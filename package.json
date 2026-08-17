@@ -1,0 +1,32 @@
+{
+  "name": "reachmy-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "reachmy.ai Phase -1 MCP + OAuth spike",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.0",
+    "@modelcontextprotocol/hono": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "hono": "^4.11.4",
+    "jose": "^6.0.13",
+    "oidc-provider": "^9.11.3",
+    "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/oidc-provider": "^9.11.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "packageManager": "pnpm@10.15.0"
+}
