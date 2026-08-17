@@ -5,8 +5,7 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { createMcpHonoApp } from "@modelcontextprotocol/hono";
 import type { Context } from "hono";
 import type { AppConfig } from "./config.js";
-import { hostnameFromUrl } from "./config.js";
-import { createOidcProvider, mcpResource } from "./auth/oidc.js";
+import { createOidcProvider, logOauth, mcpResource } from "./auth/oidc.js";
 import { createTokenVerifier } from "./auth/verify-token.js";
 import { createPhaseMinus1McpServer } from "./mcp/server.js";
 import { handleInteraction, renderDevCallback } from "./web.js";
@@ -16,13 +15,12 @@ export function createHttpServer(config: AppConfig) {
   const oidc = provider.callback();
   const verifyAccessToken = createTokenVerifier(config);
   const resource = mcpResource(config.publicUrl);
-  const host = hostnameFromUrl(config.publicUrl);
 
   const mcpHandler = createMcpHandler(() => createPhaseMinus1McpServer(null));
 
   const app = createMcpHonoApp({
     host: "0.0.0.0",
-    allowedHosts: [host, "localhost", "127.0.0.1"],
+    allowedHosts: config.allowedHosts,
   });
 
   app.get("/health", (c) =>
@@ -32,6 +30,7 @@ export function createHttpServer(config: AppConfig) {
       mcp: "/mcp",
       resource,
       issuer: config.publicUrl,
+      allowedHosts: config.allowedHosts,
     }),
   );
 
@@ -98,6 +97,22 @@ export function createHttpServer(config: AppConfig) {
   const honoListener = getRequestListener(app.fetch);
 
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const started = Date.now();
+    const originalEnd = res.end.bind(res);
+    res.end = ((...args: Parameters<ServerResponse["end"]>) => {
+      const path = req.url ?? "/";
+      if (path.startsWith("/auth") || path.startsWith("/interaction") || path.startsWith("/reg") || path.startsWith("/token")) {
+        logOauth("http_done", {
+          method: req.method,
+          path,
+          status: res.statusCode,
+          location: res.getHeader("location") ? String(res.getHeader("location")) : null,
+          ms: Date.now() - started,
+        });
+      }
+      return originalEnd(...args);
+    }) as ServerResponse["end"];
+
     const path = req.url?.split("?")[0] ?? "/";
     const honoPaths = [
       "/",
