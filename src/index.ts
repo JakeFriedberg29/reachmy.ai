@@ -14,7 +14,7 @@ const server = await createHttpServer(config, db, jwks);
 server.listen(config.port, "0.0.0.0", () => {
   console.log(
     JSON.stringify({
-      msg: "reachmy.ai phase 0 listening",
+      msg: "reachmy.ai phase 1 listening",
       port: config.port,
       publicUrl: config.publicUrl,
       mcp: `${config.publicUrl}/mcp`,

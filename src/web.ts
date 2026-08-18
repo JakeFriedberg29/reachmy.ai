@@ -90,7 +90,7 @@ export function renderSecurity(connections: Array<{ id: string; displayLabel: st
     "Security",
     `
     <h1>Authorized agents</h1>
-    <p class="muted">Disconnect is Phase 1. This page exists so grant-scoped connections are visible without a dashboard.</p>
+    <p class="muted">AI connections authorized to represent your Agent Name. Revoke a specific connection from your AI (it does not delete your Agent Name). Browser re-auth before revoke is the intended production UX.</p>
     <ul>${rows || "<li>No connections</li>"}</ul>
     <p><a class="button" href="/sign-in">Sign in</a></p>
   `,

@@ -10,7 +10,7 @@ import type { SigningJwks } from "./db/jwks.js";
 import { createDrizzleAdapter } from "./auth/drizzle-adapter.js";
 import { createOidcProvider, logOauth, mcpResource, SCOPES } from "./auth/oidc.js";
 import { createTokenVerifier } from "./auth/verify-token.js";
-import { createPhaseMinus1McpServer } from "./mcp/server.js";
+import { createNetworkMcpServer } from "./mcp/server.js";
 import { resolveAccountId, type AppEnv } from "./http/context.js";
 import { createV1Routes } from "./http/v1.js";
 import { listConnections } from "./domain/identity.js";
@@ -31,7 +31,6 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
   const oidc = provider.callback();
   const verifyAccessToken = createTokenVerifier(config, db);
   const resource = mcpResource(config.publicUrl);
-  const mcpHandler = createMcpHandler(() => createPhaseMinus1McpServer(null));
 
   const app = createMcpHonoApp({
     host: "0.0.0.0",
@@ -52,7 +51,7 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
   app.get("/health", (c) =>
     c.json({
       ok: true,
-      phase: 0,
+      phase: 1,
       mcp: "/mcp",
       resource,
       issuer: config.publicUrl,
@@ -63,8 +62,8 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
   app.get("/", (c) =>
     c.json({
       name: "reachmy.ai",
-      phase: 0,
-      message: "Network core. Website is sign-in, OAuth consent, invite fallback, and security only.",
+      phase: 1,
+      message: "Network core with MCP tools. Website is sign-in, OAuth consent, invite fallback, and security only.",
       endpoints: {
         health: "/health",
         mcp: "/mcp",
@@ -142,7 +141,9 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
         { "WWW-Authenticate": wwwAuthenticate },
       );
     }
-    const authedHandler = createMcpHandler(() => createPhaseMinus1McpServer(principal));
+    const authedHandler = createMcpHandler(() =>
+      createNetworkMcpServer({ db, principal, publicUrl: config.publicUrl }),
+    );
     return authedHandler.fetch(c.req.raw, {
       parsedBody: c.get("parsedBody"),
       authInfo: {
@@ -156,8 +157,6 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
       },
     });
   });
-
-  void mcpHandler;
 
   const honoListener = getRequestListener(app.fetch);
 

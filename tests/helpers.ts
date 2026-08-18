@@ -2,9 +2,10 @@ import { randomBytes } from "node:crypto";
 import { loadConfig } from "../src/config.js";
 import { createDb, createSql, type Database } from "../src/db/client.js";
 import { applyMigrations } from "../src/db/migrate.js";
-import { provisionTestPrincipal } from "../src/domain/identity.js";
+import { provisionTestPrincipal, upsertGrantConnection } from "../src/domain/identity.js";
 import type { Actor } from "../src/domain/types.js";
 import { ensureApiConnection } from "../src/domain/identity.js";
+import type { VerifiedPrincipal } from "../src/auth/verify-token.js";
 
 let shared: { db: Database; sql: ReturnType<typeof createSql> } | null = null;
 
@@ -41,6 +42,44 @@ export async function makePrincipal(
       accountId: identity.account_id,
       principalId: identity.principal_id,
       connectionId,
+    },
+  };
+}
+
+export async function makeGrantPrincipal(
+  db: Database,
+  name: string,
+  label = "MCP",
+): Promise<{
+  identity: Awaited<ReturnType<typeof provisionTestPrincipal>>;
+  actor: Actor;
+  principal: VerifiedPrincipal;
+}> {
+  const { identity, actor: apiActor } = await makePrincipal(db, name);
+  const grantId = `${label}:${identity.principal_id}:${suffix()}`;
+  const connectionId = await upsertGrantConnection(db, {
+    principalId: identity.principal_id!,
+    grantId,
+    oauthClientId: grantId,
+    displayLabel: label,
+  });
+  void apiActor;
+  return {
+    identity,
+    actor: {
+      accountId: identity.account_id,
+      principalId: identity.principal_id!,
+      connectionId,
+    },
+    principal: {
+      accountId: identity.account_id,
+      principalId: identity.principal_id!,
+      handle: identity.handle ?? "",
+      displayName: identity.display_name ?? "",
+      grantId,
+      clientId: grantId,
+      connectionId,
+      onboarding: "complete",
     },
   };
 }

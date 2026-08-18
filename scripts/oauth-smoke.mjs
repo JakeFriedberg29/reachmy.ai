@@ -228,19 +228,6 @@ async function main() {
     ),
   );
 
-  log(
-    "mcp tools/call create_test_item",
-    await mcp(
-      {
-        jsonrpc: "2.0",
-        id: 3,
-        method: "tools/call",
-        params: { name: "create_test_item", arguments: { text: "phase -1 smoke" } },
-      },
-      tokens.access_token,
-    ),
-  );
-
   const refreshRes = await visit(asm.token_endpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },

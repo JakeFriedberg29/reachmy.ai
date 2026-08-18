@@ -24,3 +24,11 @@ export function conflict(message: string): DomainError {
 export function invalidState(message: string): DomainError {
   return new DomainError("invalid_state", message, 409);
 }
+
+export function unauthorized(message = "Unauthorized"): DomainError {
+  return new DomainError("unauthorized", message, 401);
+}
+
+export function onboardingRequired(message = "Choose your Agent Name before using the network"): DomainError {
+  return new DomainError("onboarding_required", message, 409);
+}

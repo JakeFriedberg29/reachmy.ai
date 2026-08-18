@@ -6,9 +6,9 @@ import {
   handles,
   principals,
 } from "../db/schema.js";
-import { conflict, DomainError, notFound } from "./errors.js";
+import { conflict, DomainError, notFound, onboardingRequired, unauthorized } from "./errors.js";
 import type { Actor } from "./types.js";
-import { HANDLE_RE } from "./types.js";
+import { formatAgentName, HANDLE_RE, normalizeHandle } from "./types.js";
 
 function isUniqueViolation(error: unknown): boolean {
   let current: unknown = error;
@@ -26,8 +26,15 @@ export type IdentityView = {
   principal_id: string | null;
   clerk_user_id: string;
   handle: string | null;
+  agent_name: string | null;
   display_name: string | null;
   onboarding: "complete" | "ONBOARDING_REQUIRED";
+};
+
+export type PublicIdentityView = {
+  agent_name: string;
+  display_name: string;
+  principal_id: string;
 };
 
 async function identityFromAccount(
@@ -47,6 +54,7 @@ async function identityFromAccount(
       principal_id: null,
       clerk_user_id: account.clerkUserId,
       handle: null,
+      agent_name: null,
       display_name: null,
       onboarding: "ONBOARDING_REQUIRED",
     };
@@ -61,6 +69,7 @@ async function identityFromAccount(
     principal_id: principal.id,
     clerk_user_id: account.clerkUserId,
     handle: handle?.handle ?? null,
+    agent_name: formatAgentName(handle?.handle),
     display_name: principal.displayName,
     onboarding: handle ? "complete" : "ONBOARDING_REQUIRED",
   };
@@ -104,19 +113,28 @@ export async function getIdentityByPrincipalId(db: Database | Tx, principalId: s
 export async function requireActorPrincipal(db: Database | Tx, accountId: string): Promise<Actor> {
   const identity = await identityFromAccount(db, accountId);
   if (!identity.principal_id) {
-    throw new DomainError("onboarding_required", "Create an identity before using the network", 409);
+    throw onboardingRequired("Choose your Agent Name before using the network");
   }
   const connectionId = await ensureApiConnection(db, identity.principal_id);
   return { accountId, principalId: identity.principal_id, connectionId };
 }
 
 export async function findPrincipalByHandle(db: Database | Tx, rawHandle: string) {
-  const handle = rawHandle.replace(/^@/, "").toLowerCase();
+  const handle = normalizeHandle(rawHandle);
   const [row] = await db.select().from(handles).where(eq(handles.handle, handle)).limit(1);
-  if (!row) throw notFound(`Unknown handle @${handle}`);
+  if (!row) throw notFound(`Unknown Agent Name @${handle}`);
   const [principal] = await db.select().from(principals).where(eq(principals.id, row.principalId)).limit(1);
   if (!principal) throw notFound("Principal not found");
   return { principal, handle: row };
+}
+
+export async function resolveIdentity(db: Database | Tx, rawHandle: string): Promise<PublicIdentityView> {
+  const { principal, handle } = await findPrincipalByHandle(db, rawHandle);
+  return {
+    agent_name: formatAgentName(handle.handle)!,
+    display_name: principal.displayName,
+    principal_id: principal.id,
+  };
 }
 
 export async function createIdentity(
@@ -124,9 +142,13 @@ export async function createIdentity(
   accountId: string,
   input: { handle: string; displayName: string },
 ) {
-  const handle = input.handle.replace(/^@/, "").toLowerCase();
+  const handle = normalizeHandle(input.handle);
   if (!HANDLE_RE.test(handle)) {
-    throw new DomainError("invalid_handle", "Handle must match ^[a-z0-9_]{3,30}$", 400);
+    throw new DomainError(
+      "invalid_agent_name",
+      "Agent Name must be 3–30 characters: lowercase letters, numbers, and underscores (example: @jake)",
+      400,
+    );
   }
   const displayName = input.displayName.trim();
   if (!displayName) throw new DomainError("invalid_display_name", "display_name is required", 400);
@@ -134,7 +156,7 @@ export async function createIdentity(
   return db.transaction(async (tx) => {
     const identity = await identityFromAccount(tx, accountId);
     if (identity.principal_id) {
-      throw conflict("Identity already exists for this account");
+      throw conflict("An Agent Name already exists for this account");
     }
     try {
       const [principal] = await tx
@@ -146,7 +168,7 @@ export async function createIdentity(
       return identityFromAccount(tx, accountId);
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw conflict("Handle already taken");
+        throw conflict("Agent Name already taken");
       }
       throw error;
     }
@@ -237,6 +259,9 @@ export async function upsertGrantConnection(
     )
     .limit(1);
   if (byGrant) {
+    if (byGrant.status === "revoked") {
+      throw unauthorized("This AI connection has been revoked and can no longer represent this Agent Name");
+    }
     await db
       .update(agentConnections)
       .set({
@@ -279,6 +304,32 @@ export async function upsertGrantConnection(
 
 export async function listConnections(db: Database | Tx, principalId: string) {
   return db.select().from(agentConnections).where(eq(agentConnections.principalId, principalId));
+}
+
+export async function getConnectionById(db: Database | Tx, connectionId: string) {
+  const [row] = await db
+    .select()
+    .from(agentConnections)
+    .where(eq(agentConnections.id, connectionId))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function findConnectionByGrant(
+  db: Database | Tx,
+  principalId: string,
+  grantId: string,
+) {
+  const [row] = await db
+    .select()
+    .from(agentConnections)
+    .where(and(eq(agentConnections.principalId, principalId), eq(agentConnections.grantId, grantId)))
+    .limit(1);
+  return row ?? null;
+}
+
+export function isApiConnection(grantId: string | null | undefined): boolean {
+  return Boolean(grantId?.startsWith("api:"));
 }
 
 export async function primaryConnectionId(db: Database | Tx, principalId: string): Promise<string | null> {

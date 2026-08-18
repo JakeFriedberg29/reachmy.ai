@@ -74,7 +74,7 @@ async function main() {
     const get = (token: string, url: string) => fetch(url, { headers: headers(token) });
 
     const health = await json(await fetch(`${base}/health`));
-    if ((health as { phase?: number }).phase !== 0) throw new Error("health phase is not 0");
+    if (!(health as { ok?: boolean }).ok) throw new Error("health failed");
 
     const invite = await json(await post(jakeToken, `${base}/v1/invites`));
     if (!invite.token) throw new Error("invite token missing");

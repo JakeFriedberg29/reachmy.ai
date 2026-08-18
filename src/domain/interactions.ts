@@ -1,8 +1,9 @@
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import type { Database, Tx } from "../db/client.js";
 import {
   approvalRequests,
   auditLogs,
+  handles,
   inboxItems,
   interactionEvents,
   interactions,
@@ -12,6 +13,7 @@ import { conflict, forbidden, invalidState, notFound } from "./errors.js";
 import { findPrincipalByHandle, primaryConnectionId } from "./identity.js";
 import { requirePermission } from "./relationships.js";
 import type { Actor } from "./types.js";
+import { formatAgentName } from "./types.js";
 
 const INTERACTION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const OPEN_STATUSES = new Set(["PENDING", "IN_PROGRESS", "AWAITING_OWNER"]);
@@ -443,4 +445,28 @@ export async function getInteractionBundle(db: Database | Tx, actor: Actor, inte
 
 export async function listInbox(db: Database | Tx, actor: Actor) {
   return db.select().from(inboxItems).where(eq(inboxItems.principalId, actor.principalId));
+}
+
+export async function listPendingInteractions(db: Database | Tx, actor: Actor) {
+  const items = await db
+    .select()
+    .from(inboxItems)
+    .where(and(eq(inboxItems.principalId, actor.principalId), ne(inboxItems.state, "archived")));
+  const pending = [];
+  for (const item of items) {
+    const interaction = await loadInteraction(db, item.interactionId);
+    const otherId = counterparty(interaction, actor.principalId);
+    const [handle] = await db.select().from(handles).where(eq(handles.principalId, otherId)).limit(1);
+    pending.push({
+      inbox_item_id: item.id,
+      interaction_id: interaction.id,
+      type: interaction.type,
+      status: interaction.status,
+      intent: interaction.intent,
+      inbox_state: item.state,
+      claimed: Boolean(item.claimedByAgentConnectionId),
+      other_agent_name: formatAgentName(handle?.handle),
+    });
+  }
+  return pending;
 }

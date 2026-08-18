@@ -1,7 +1,8 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { AppConfig } from "../config.js";
 import type { Database } from "../db/client.js";
-import { getIdentityByAccountId, upsertGrantConnection } from "../domain/identity.js";
+import { findConnectionByGrant, getIdentityByAccountId, upsertGrantConnection } from "../domain/identity.js";
+import { CONNECTION_REVOKED } from "../domain/connections.js";
 import { mcpResource } from "./oidc.js";
 
 export type VerifiedPrincipal = {
@@ -50,12 +51,18 @@ export function createTokenVerifier(config: AppConfig, db: Database) {
       const clientId = typeof payload.client_id === "string" ? payload.client_id : null;
       let connectionId: string | null = null;
       if (grantId) {
-        connectionId = await upsertGrantConnection(db, {
-          principalId: identity.principal_id,
-          grantId,
-          oauthClientId: clientId,
-          displayLabel: "MCP",
-        });
+        const existing = await findConnectionByGrant(db, identity.principal_id, grantId);
+        if (existing?.status === CONNECTION_REVOKED) return null;
+        try {
+          connectionId = await upsertGrantConnection(db, {
+            principalId: identity.principal_id,
+            grantId,
+            oauthClientId: clientId,
+            displayLabel: "MCP",
+          });
+        } catch {
+          return null;
+        }
       }
       return {
         accountId,

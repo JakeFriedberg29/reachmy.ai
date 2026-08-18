@@ -1,8 +1,10 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, or } from "drizzle-orm";
 import type { Database, Tx } from "../db/client.js";
-import { blocks, relationshipPermissions, relationships } from "../db/schema.js";
-import { forbidden, notFound } from "./errors.js";
-import { orderedPair } from "./types.js";
+import { blocks, handles, relationshipPermissions, relationships } from "../db/schema.js";
+import { findPrincipalByHandle } from "./identity.js";
+import { forbidden, invalidState, notFound } from "./errors.js";
+import { formatAgentName, orderedPair } from "./types.js";
+import type { Actor } from "./types.js";
 
 const DEFAULT_PERMS = {
   messaging: true,
@@ -161,4 +163,80 @@ export async function setPermissionFlag(
     .returning();
   if (!updated) throw notFound("Permissions row missing");
   return updated;
+}
+
+function publicFlags(row: {
+  messaging: boolean;
+  scheduling: boolean;
+  negotiation: boolean;
+} | null) {
+  return {
+    messaging: row?.messaging ?? false,
+    scheduling: row?.scheduling ?? false,
+    negotiation: row?.negotiation ?? false,
+  };
+}
+
+export async function listRelationshipsFor(db: Database | Tx, principalId: string) {
+  const rows = await db
+    .select()
+    .from(relationships)
+    .where(
+      and(
+        or(eq(relationships.principalLowId, principalId), eq(relationships.principalHighId, principalId)),
+        eq(relationships.status, "active"),
+      ),
+    );
+  const result = [];
+  for (const row of rows) {
+    const otherId = row.principalLowId === principalId ? row.principalHighId : row.principalLowId;
+    const [handle] = await db.select().from(handles).where(eq(handles.principalId, otherId)).limit(1);
+    result.push({
+      relationship_id: row.id,
+      other_principal_id: otherId,
+      agent_name: formatAgentName(handle?.handle),
+      status: row.status,
+    });
+  }
+  return result;
+}
+
+export async function getRelationshipPermissionsView(db: Database | Tx, actor: Actor, otherHandle: string) {
+  const { principal: other, handle } = await findPrincipalByHandle(db, otherHandle);
+  const rel = await requireActiveRelationship(db, actor.principalId, other.id);
+  const grantedToThem = await getDirectionalPermission(db, rel.id, actor.principalId, other.id);
+  const grantedToMe = await getDirectionalPermission(db, rel.id, other.id, actor.principalId);
+  return {
+    relationship_id: rel.id,
+    other_agent_name: formatAgentName(handle.handle),
+    granted_to_them: publicFlags(grantedToThem),
+    granted_to_me: publicFlags(grantedToMe),
+  };
+}
+
+export async function setRelationshipPermissions(
+  db: Database,
+  actor: Actor,
+  input: {
+    otherHandle: string;
+    messaging?: boolean;
+    scheduling?: boolean;
+    negotiation?: boolean;
+  },
+) {
+  const { principal: other, handle } = await findPrincipalByHandle(db, input.otherHandle);
+  const flags: Array<["messaging" | "scheduling" | "negotiation", boolean]> = [];
+  if (typeof input.messaging === "boolean") flags.push(["messaging", input.messaging]);
+  if (typeof input.scheduling === "boolean") flags.push(["scheduling", input.scheduling]);
+  if (typeof input.negotiation === "boolean") flags.push(["negotiation", input.negotiation]);
+  if (!flags.length) throw invalidState("Provide at least one of messaging, scheduling, or negotiation");
+  for (const [capability, value] of flags) {
+    await setPermissionFlag(db, {
+      actorPrincipalId: actor.principalId,
+      otherPrincipalId: other.id,
+      capability,
+      value,
+    });
+  }
+  return getRelationshipPermissionsView(db, actor, handle.handle);
 }

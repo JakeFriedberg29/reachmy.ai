@@ -1,6 +1,8 @@
 # reachmy.ai
 
-Phase -1 MCP + OAuth spike for Agent Network.
+Phase 1 Agent Network: MCP tools over the Phase 0 domain core.
+
+**Agent Name** is the durable identity (example: `@jake`). Claude, ChatGPT, and OpenClaw are AI connections that may represent that Agent Name — they are not the identity.
 
 ## Deploy / Railway
 
@@ -17,32 +19,29 @@ Required Railway variables:
 
 - `PUBLIC_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}` (or the hardcoded `https://reachmyai-production.up.railway.app`)
 - `COOKIE_KEYS` — long random string for OAuth cookies
+- `DATABASE_URL`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`
 
 Without `PUBLIC_URL`, `/health` and `/mcp` 403 on the Railway hostname and the OAuth issuer is `http://localhost:8080`.
 
 Endpoints after deploy:
 
 - `GET /health`
-- `POST /mcp` — Streamable HTTP MCP (`get_identity`, `create_test_item`)
+- `POST /mcp` — Streamable HTTP MCP (identity, invites, interactions, TIME proposals, revoke)
 - `/.well-known/oauth-protected-resource`
 - `/.well-known/oauth-authorization-server` (oidc-provider)
 - `/jwks`
 
 Claude custom connector URL should be `https://<railway-host>/mcp`.
 
-OAuth state (registered clients, grants, sessions, tokens) is in-memory, so **every redeploy
-invalidates Claude's connector**. Remove and re-add the connector after each deploy.
+OAuth clients, grants, sessions, and tokens persist in Postgres.
 
 ## OAuth + MCP smoke test
 
-Runs the full Claude-shaped flow (dynamic registration, PKCE, consent, token, MCP tools, refresh):
-
 ```bash
-pnpm build && node dist/index.js          # terminal 1
-node scripts/oauth-smoke.mjs http://localhost:8080   # terminal 2
+pnpm smoke:phase1
 ```
 
-`SCOPE="-"` omits the scope param; `REDIRECT_URI` overrides the client callback.
+`scripts/oauth-smoke.mjs` still exercises DCR + PKCE + refresh against a running server.
 
 ## Local
 
@@ -52,4 +51,4 @@ pnpm install
 pnpm dev
 ```
 
-Optional env: `PUBLIC_URL`, `COOKIE_KEYS`, `TEST_ACCOUNT_ID`, `TEST_PRINCIPAL_ID`.
+Required env: `PUBLIC_URL`, `COOKIE_KEYS`, `DATABASE_URL`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`.
