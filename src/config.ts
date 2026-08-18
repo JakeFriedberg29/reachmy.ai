@@ -26,10 +26,9 @@ export type AppConfig = {
   publicUrl: string;
   cookieKeys: string[];
   allowedHosts: string[];
-  testAccountId: string;
-  testPrincipalId: string;
-  testHandle: string;
-  testDisplayName: string;
+  databaseUrl: string;
+  clerkPublishableKey: string;
+  clerkSecretKey: string;
 };
 
 export function loadConfig(): AppConfig {
@@ -67,16 +66,9 @@ export function loadConfig(): AppConfig {
       "localhost",
       "127.0.0.1",
     ]),
-    testAccountId: required(
-      "TEST_ACCOUNT_ID",
-      "8a2f3c4e-1111-4111-8111-aaaaaaaaaaaa",
-    ),
-    testPrincipalId: required(
-      "TEST_PRINCIPAL_ID",
-      "8a2f3c4e-2222-4222-8222-bbbbbbbbbbbb",
-    ),
-    testHandle: process.env.TEST_HANDLE ?? "jake",
-    testDisplayName: process.env.TEST_DISPLAY_NAME ?? "Test Jake",
+    databaseUrl: required("DATABASE_URL"),
+    clerkPublishableKey: required("CLERK_PUBLISHABLE_KEY"),
+    clerkSecretKey: required("CLERK_SECRET_KEY"),
   };
 }
 

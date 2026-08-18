@@ -1,9 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import Provider from "oidc-provider";
+import Provider, { type AdapterConstructor } from "oidc-provider";
 import type { AppConfig } from "../config.js";
-import { MemoryAdapter } from "./memory-adapter.js";
+import type { Database } from "../db/client.js";
+import type { SigningJwks } from "../db/jwks.js";
+import { getIdentityByAccountId } from "../domain/identity.js";
 
-const SCOPES = "openid identity:read interactions:write offline_access";
+export const SCOPES =
+  "openid identity:read contacts:read contacts:write interactions:read interactions:write proposals:write approvals:write offline_access";
 
 export function mcpResource(publicUrl: string): string {
   return `${publicUrl}/mcp`;
@@ -81,11 +84,17 @@ function attachRedirectLogger(res: ServerResponse, context: Record<string, unkno
   });
 }
 
-export function createOidcProvider(config: AppConfig): Provider {
+export function createOidcProvider(
+  config: AppConfig,
+  db: Database,
+  adapter: AdapterConstructor,
+  jwks: SigningJwks,
+): Provider {
   const resource = mcpResource(config.publicUrl);
   const https = config.publicUrl.startsWith("https");
   const provider = new Provider(config.publicUrl, {
-    adapter: MemoryAdapter,
+    adapter,
+    jwks,
     cookies: {
       keys: config.cookieKeys,
       short: {
@@ -179,10 +188,17 @@ export function createOidcProvider(config: AppConfig): Provider {
       claims: async () => ({ sub: id }),
     }),
     extraTokenClaims: async (_ctx, token) => {
-      if ("accountId" in token && token.accountId) {
-        return { principal_id: config.testPrincipalId };
+      const accountId = "accountId" in token ? String(token.accountId ?? "") : "";
+      if (!accountId) return undefined;
+      try {
+        const identity = await getIdentityByAccountId(db, accountId);
+        const extra: Record<string, string> = {};
+        if (identity.principal_id) extra.principal_id = identity.principal_id;
+        if ("grantId" in token && token.grantId) extra.grant_id = String(token.grantId);
+        return extra;
+      } catch {
+        return undefined;
       }
-      return undefined;
     },
   });
 
@@ -244,6 +260,7 @@ export async function completeOauthInteraction(
   config: AppConfig,
   req: IncomingMessage,
   res: ServerResponse,
+  accountId: string,
 ): Promise<void> {
   const details = await provider.interactionDetails(req, res);
   const { prompt, params, session, uid, grantId, returnTo } = details;
@@ -251,7 +268,7 @@ export async function completeOauthInteraction(
   const redirectUri = typeof params.redirect_uri === "string" ? params.redirect_uri : null;
   const client = clientId ? await provider.Client.find(clientId) : undefined;
   const registeredRedirects = client?.redirectUris ?? [];
-  const accountId = session?.accountId ?? config.testAccountId;
+  void config;
 
   logOauth("interaction_details", {
     method: req.method,

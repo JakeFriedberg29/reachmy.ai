@@ -2,29 +2,35 @@
   "name": "reachmy-ai",
   "version": "0.1.0",
   "private": true,
-  "description": "reachmy.ai Phase -1 MCP + OAuth spike",
+  "description": "reachmy.ai Agent Network",
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --env-file=.env src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --env-file=.env --test tests/phase0.test.ts",
+    "smoke:phase0": "tsx --env-file=.env scripts/phase0-smoke.ts"
   },
   "dependencies": {
+    "@clerk/backend": "^3.16.6",
     "@hono/node-server": "^1.19.0",
     "@modelcontextprotocol/hono": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.11.4",
     "jose": "^6.0.13",
     "oidc-provider": "^9.11.3",
+    "postgres": "^3.4.9",
     "zod": "^4.2.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
     "@types/oidc-provider": "^9.11.1",
+    "drizzle-kit": "^0.31.10",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   },

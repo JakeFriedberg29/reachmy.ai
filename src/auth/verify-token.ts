@@ -1,5 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { AppConfig } from "../config.js";
+import type { Database } from "../db/client.js";
+import { getIdentityByAccountId, upsertGrantConnection } from "../domain/identity.js";
 import { mcpResource } from "./oidc.js";
 
 export type VerifiedPrincipal = {
@@ -7,9 +9,13 @@ export type VerifiedPrincipal = {
   principalId: string;
   handle: string;
   displayName: string;
+  grantId: string | null;
+  clientId: string | null;
+  connectionId: string | null;
+  onboarding: "complete" | "ONBOARDING_REQUIRED";
 };
 
-export function createTokenVerifier(config: AppConfig) {
+export function createTokenVerifier(config: AppConfig, db: Database) {
   const jwks = createRemoteJWKSet(new URL(`${config.publicUrl}/jwks`));
   const resource = mcpResource(config.publicUrl);
 
@@ -26,12 +32,40 @@ export function createTokenVerifier(config: AppConfig) {
         audience: resource,
       });
       const accountId = typeof payload.sub === "string" ? payload.sub : null;
-      if (!accountId || accountId !== config.testAccountId) return null;
+      if (!accountId) return null;
+      const identity = await getIdentityByAccountId(db, accountId);
+      if (!identity.principal_id || identity.onboarding === "ONBOARDING_REQUIRED") {
+        return {
+          accountId,
+          principalId: identity.principal_id ?? "",
+          handle: identity.handle ?? "",
+          displayName: identity.display_name ?? "",
+          grantId: typeof payload.grant_id === "string" ? payload.grant_id : null,
+          clientId: typeof payload.client_id === "string" ? payload.client_id : null,
+          connectionId: null,
+          onboarding: "ONBOARDING_REQUIRED",
+        };
+      }
+      const grantId = typeof payload.grant_id === "string" ? payload.grant_id : null;
+      const clientId = typeof payload.client_id === "string" ? payload.client_id : null;
+      let connectionId: string | null = null;
+      if (grantId) {
+        connectionId = await upsertGrantConnection(db, {
+          principalId: identity.principal_id,
+          grantId,
+          oauthClientId: clientId,
+          displayLabel: "MCP",
+        });
+      }
       return {
         accountId,
-        principalId: config.testPrincipalId,
-        handle: config.testHandle,
-        displayName: config.testDisplayName,
+        principalId: identity.principal_id,
+        handle: identity.handle ?? "",
+        displayName: identity.display_name ?? "",
+        grantId,
+        clientId,
+        connectionId,
+        onboarding: "complete",
       };
     } catch {
       return null;

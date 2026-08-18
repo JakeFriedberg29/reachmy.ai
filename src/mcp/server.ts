@@ -38,9 +38,10 @@ export function createPhaseMinus1McpServer(principal: VerifiedPrincipal | null) 
             type: "text",
             text: JSON.stringify({
               account_id: principal.accountId,
-              principal_id: principal.principalId,
-              handle: principal.handle,
-              display_name: principal.displayName,
+              principal_id: principal.principalId || null,
+              handle: principal.handle || null,
+              display_name: principal.displayName || null,
+              onboarding: principal.onboarding,
             }),
           },
         ],
