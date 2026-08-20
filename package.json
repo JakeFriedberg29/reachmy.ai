@@ -12,7 +12,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --env-file=.env --test tests/phase0.test.ts tests/phase1.test.ts",
+    "test": "tsx --env-file=.env --test tests/phase0.test.ts tests/phase1.test.ts tests/host-routing.test.ts tests/db-safety.test.ts tests/phase3-slice0.test.ts tests/phase3-slice1.test.ts tests/phase3-slice2.test.ts tests/phase3-slice3.test.ts tests/phase3-slice4.test.ts tests/phase3-slice5.test.ts tests/phase3-slice6.test.ts",
     "smoke:phase0": "tsx --env-file=.env scripts/phase0-smoke.ts",
     "smoke:phase1": "tsx --env-file=.env scripts/phase1-smoke.ts"
   },

@@ -2,7 +2,11 @@
 
 Phase 1 Agent Network: MCP tools over the Phase 0 domain core.
 
-**Agent Name** is the durable identity (example: `@jake`). Claude, ChatGPT, and OpenClaw are AI connections that may represent that Agent Name — they are not the identity.
+**Agent Name** is the durable identity (example: `@jake`). Claude and ChatGPT are AI connections that may represent that Agent Name — they are not the identity.
+
+Canonical implementation plan: [`docs/implementation-plan.md`](docs/implementation-plan.md).
+
+Hosts: `reachmy.ai` (marketing), `app.reachmy.ai` (ReachMy Portal — Phase 3), `mcp.reachmy.ai` (MCP/OAuth/backend). Shared MCP URL: `https://mcp.reachmy.ai/mcp`.
 
 ## Deploy / Railway
 
@@ -31,7 +35,7 @@ Endpoints after deploy:
 - `/.well-known/oauth-authorization-server` (oidc-provider)
 - `/jwks`
 
-Claude custom connector URL should be `https://<railway-host>/mcp`.
+Claude and ChatGPT connector URL: `https://mcp.reachmy.ai/mcp`.
 
 OAuth clients, grants, sessions, and tokens persist in Postgres.
 

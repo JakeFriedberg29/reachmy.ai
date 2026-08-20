@@ -1,7 +1,12 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { AppConfig } from "../config.js";
 import type { Database } from "../db/client.js";
-import { findConnectionByGrant, getIdentityByAccountId, upsertGrantConnection } from "../domain/identity.js";
+import {
+  ensureProvisionalPrincipal,
+  findConnectionByGrant,
+  getIdentityByAccountId,
+  upsertGrantConnection,
+} from "../domain/identity.js";
 import { CONNECTION_REVOKED } from "../domain/connections.js";
 import { mcpResource } from "./oidc.js";
 
@@ -34,23 +39,15 @@ export function createTokenVerifier(config: AppConfig, db: Database) {
       });
       const accountId = typeof payload.sub === "string" ? payload.sub : null;
       if (!accountId) return null;
-      const identity = await getIdentityByAccountId(db, accountId);
-      if (!identity.principal_id || identity.onboarding === "ONBOARDING_REQUIRED") {
-        return {
-          accountId,
-          principalId: identity.principal_id ?? "",
-          handle: identity.handle ?? "",
-          displayName: identity.display_name ?? "",
-          grantId: typeof payload.grant_id === "string" ? payload.grant_id : null,
-          clientId: typeof payload.client_id === "string" ? payload.client_id : null,
-          connectionId: null,
-          onboarding: "ONBOARDING_REQUIRED",
-        };
+      let identity = await getIdentityByAccountId(db, accountId);
+      if (!identity.principal_id) {
+        await ensureProvisionalPrincipal(db, accountId);
+        identity = await getIdentityByAccountId(db, accountId);
       }
       const grantId = typeof payload.grant_id === "string" ? payload.grant_id : null;
       const clientId = typeof payload.client_id === "string" ? payload.client_id : null;
       let connectionId: string | null = null;
-      if (grantId) {
+      if (grantId && identity.principal_id) {
         const existing = await findConnectionByGrant(db, identity.principal_id, grantId);
         if (existing?.status === CONNECTION_REVOKED) return null;
         try {
@@ -66,13 +63,13 @@ export function createTokenVerifier(config: AppConfig, db: Database) {
       }
       return {
         accountId,
-        principalId: identity.principal_id,
+        principalId: identity.principal_id ?? "",
         handle: identity.handle ?? "",
         displayName: identity.display_name ?? "",
         grantId,
         clientId,
         connectionId,
-        onboarding: "complete",
+        onboarding: identity.onboarding,
       };
     } catch {
       return null;

@@ -3,7 +3,7 @@ import Provider, { type AdapterConstructor } from "oidc-provider";
 import type { AppConfig } from "../config.js";
 import type { Database } from "../db/client.js";
 import type { SigningJwks } from "../db/jwks.js";
-import { getIdentityByAccountId } from "../domain/identity.js";
+import { ensureProvisionalPrincipal, getIdentityByAccountId } from "../domain/identity.js";
 
 export const SCOPES =
   "openid identity:read contacts:read contacts:write interactions:read interactions:write proposals:write approvals:write offline_access";
@@ -258,10 +258,12 @@ export function createOidcProvider(
 export async function completeOauthInteraction(
   provider: Provider,
   config: AppConfig,
+  db: Database,
   req: IncomingMessage,
   res: ServerResponse,
   accountId: string,
 ): Promise<void> {
+  await ensureProvisionalPrincipal(db, accountId);
   const details = await provider.interactionDetails(req, res);
   const { prompt, params, session, uid, grantId, returnTo } = details;
   const clientId = String(params.client_id ?? "");

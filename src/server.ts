@@ -8,10 +8,23 @@ import type { AppConfig } from "./config.js";
 import type { Database } from "./db/client.js";
 import type { SigningJwks } from "./db/jwks.js";
 import { createDrizzleAdapter } from "./auth/drizzle-adapter.js";
+import { resolveBrowserAccountId } from "./auth/browser-account.js";
+import { sessionCookieHeader } from "./auth/session-cookie.js";
 import { createOidcProvider, logOauth, mcpResource, SCOPES } from "./auth/oidc.js";
 import { createTokenVerifier } from "./auth/verify-token.js";
 import { createNetworkMcpServer } from "./mcp/server.js";
 import { resolveAccountId, type AppEnv } from "./http/context.js";
+import {
+  classifyRequestHost,
+  isMcpBackendPath,
+  isPortalHostAllowedPath,
+  normalizeHostname,
+} from "./http/host.js";
+import {
+  dispatchPortalRequest,
+  respondPortalInvalidHost,
+  respondPortalNotFound,
+} from "./http/portal-host.js";
 import { createV1Routes } from "./http/v1.js";
 import { listConnections } from "./domain/identity.js";
 import { requireActorPrincipal } from "./domain/identity.js";
@@ -52,10 +65,12 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
     c.json({
       ok: true,
       phase: 1,
+      surface: "mcp",
       mcp: "/mcp",
       resource,
       issuer: config.publicUrl,
       allowedHosts: config.allowedHosts,
+      portalHost: config.portalHost,
     }),
   );
 
@@ -86,8 +101,22 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
   app.get("/.well-known/oauth-protected-resource", (c) => c.json(protectedResourceMetadata));
   app.get("/.well-known/oauth-protected-resource/mcp", (c) => c.json(protectedResourceMetadata));
 
-  app.get("/sign-in", (c) => {
+  app.get("/sign-in", async (c) => {
     const redirect = c.req.query("redirect") || "/security";
+    const resolved = await resolveBrowserAccountId(c.req.raw, config, db);
+    if (resolved) {
+      if (resolved.mintedSession) {
+        c.header(
+          "set-cookie",
+          sessionCookieHeader(
+            resolved.accountId,
+            config.cookieKeys[0]!,
+            config.publicUrl.startsWith("https"),
+          ),
+        );
+      }
+      return c.redirect(redirect);
+    }
     c.header("content-type", "text/html; charset=utf-8");
     return c.html(renderSignIn(config, redirect));
   });
@@ -178,6 +207,28 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
     }) as ServerResponse["end"];
 
     const path = req.url?.split("?")[0] ?? "/";
+    const hostname = normalizeHostname(req.headers.host);
+    const hostKind = classifyRequestHost(hostname, config);
+
+    if (hostKind === "unknown") {
+      respondPortalInvalidHost(res);
+      return;
+    }
+
+    if (hostKind === "portal") {
+      const method = req.method ?? "GET";
+      if (isPortalHostAllowedPath(method, path)) {
+        await dispatchPortalRequest(req, res, config, db, path);
+        return;
+      }
+      if (isMcpBackendPath(path)) {
+        respondPortalNotFound(res);
+        return;
+      }
+      respondPortalNotFound(res);
+      return;
+    }
+
     if (req.method === "POST" && path.startsWith("/invite/")) {
       const token = decodeURIComponent(path.slice("/invite/".length));
       await handleInvitePost(db, config, req, res, token);

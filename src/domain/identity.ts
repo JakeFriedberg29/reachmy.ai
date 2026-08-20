@@ -104,6 +104,35 @@ export async function getIdentityByAccountId(db: Database | Tx, accountId: strin
   return identityFromAccount(db, accountId);
 }
 
+function provisionalDisplayName(email: string | null | undefined): string {
+  return email ?? "ReachMy user";
+}
+
+export async function ensureProvisionalPrincipal(
+  db: Database | Tx,
+  accountId: string,
+): Promise<IdentityView> {
+  const identity = await identityFromAccount(db, accountId);
+  if (identity.principal_id) {
+    return identity;
+  }
+  const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
+  if (!account) throw notFound("Account not found");
+  try {
+    await db.insert(principals).values({
+      accountId,
+      displayName: provisionalDisplayName(account.email),
+      status: "active",
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return identityFromAccount(db, accountId);
+    }
+    throw error;
+  }
+  return identityFromAccount(db, accountId);
+}
+
 export async function getIdentityByPrincipalId(db: Database | Tx, principalId: string) {
   const [principal] = await db.select().from(principals).where(eq(principals.id, principalId)).limit(1);
   if (!principal) throw notFound("Principal not found");
@@ -155,8 +184,24 @@ export async function createIdentity(
 
   return db.transaction(async (tx) => {
     const identity = await identityFromAccount(tx, accountId);
-    if (identity.principal_id) {
+    if (identity.principal_id && identity.handle) {
       throw conflict("An Agent Name already exists for this account");
+    }
+    if (identity.principal_id && !identity.handle) {
+      try {
+        await tx.insert(handles).values({ principalId: identity.principal_id, handle });
+        await tx
+          .update(principals)
+          .set({ displayName, updatedAt: new Date() })
+          .where(eq(principals.id, identity.principal_id));
+        await ensureApiConnection(tx, identity.principal_id);
+        return identityFromAccount(tx, accountId);
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          throw conflict("Agent Name already taken");
+        }
+        throw error;
+      }
     }
     try {
       const [principal] = await tx

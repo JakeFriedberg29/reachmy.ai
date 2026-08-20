@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   customType,
   index,
   integer,
@@ -23,12 +24,17 @@ const timestamps = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 };
 
-export const accounts = pgTable("accounts", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  email: citext("email"),
-  clerkUserId: text("clerk_user_id").notNull().unique(),
-  ...timestamps,
-});
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: citext("email"),
+    clerkUserId: text("clerk_user_id").notNull().unique(),
+    platformRole: text("platform_role").notNull().default("user"),
+    ...timestamps,
+  },
+  (t) => [check("accounts_platform_role_chk", sql`${t.platformRole} in ('user', 'admin')`)],
+);
 
 export const principals = pgTable("principals", {
   id: uuid("id").primaryKey().defaultRandom(),

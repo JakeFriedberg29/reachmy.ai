@@ -1,8 +1,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type Provider from "oidc-provider";
+import { resolveBrowserAccountId } from "./auth/browser-account.js";
 import { clerkFrontendApi } from "./auth/clerk.js";
 import { completeOauthInteraction, logOauth } from "./auth/oidc.js";
-import { decodeSessionCookie, readCookie, SESSION_COOKIE } from "./auth/session-cookie.js";
+import {
+  appendSessionCookieHeader,
+  decodeSessionCookie,
+  readCookie,
+  SESSION_COOKIE,
+} from "./auth/session-cookie.js";
 import type { AppConfig } from "./config.js";
 import type { Database } from "./db/client.js";
 import { getIdentityByAccountId } from "./domain/identity.js";
@@ -30,6 +36,20 @@ function htmlPage(title: string, body: string): string {
 
 function accountIdFromRequest(req: IncomingMessage, cookieKey: string): string | null {
   return decodeSessionCookie(readCookie(req.headers.cookie, SESSION_COOKIE), cookieKey);
+}
+
+async function resolveInteractionAccountId(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: AppConfig,
+  db: Database,
+): Promise<string | null> {
+  const resolved = await resolveBrowserAccountId(req, config, db);
+  if (!resolved) return null;
+  if (resolved.mintedSession) {
+    appendSessionCookieHeader(res, resolved.accountId, config);
+  }
+  return resolved.accountId;
 }
 
 export function renderSignIn(config: AppConfig, redirectTo: string): string {
@@ -153,7 +173,7 @@ export async function handleInteraction(
   const match = url.pathname.match(/^\/interaction\/([^/]+)(\/login)?$/);
   if (!match) return false;
 
-  const accountId = accountIdFromRequest(req, config.cookieKeys[0]!);
+  const accountId = await resolveInteractionAccountId(req, res, config, db);
 
   if (req.method === "GET" && !match[2]) {
     if (!accountId) {
@@ -172,7 +192,7 @@ export async function handleInteraction(
     });
 
     if (details.prompt.name !== "login") {
-      await completeOauthInteraction(provider, config, req, res, accountId);
+      await completeOauthInteraction(provider, config, db, req, res, accountId);
       return true;
     }
 
@@ -219,7 +239,7 @@ export async function handleInteraction(
       return true;
     }
     logOauth("interaction_post_login", { uid: match[1], path: req.url });
-    await completeOauthInteraction(provider, config, req, res, accountId);
+    await completeOauthInteraction(provider, config, db, req, res, accountId);
     return true;
   }
 
