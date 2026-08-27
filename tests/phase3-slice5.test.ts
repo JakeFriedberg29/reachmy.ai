@@ -242,7 +242,7 @@ test("Slice 5: Claude and ChatGPT connection states render correctly", async () 
     assert.match(res.body, /ChatGPT/);
     assert.match(res.body, /Connected/);
     assert.match(res.body, /Not connected/);
-    assert.match(res.body, /Coming next/);
+    assert.match(res.body, /Connect ChatGPT/);
     assertNoSensitiveLeak(res.body);
   });
 });
@@ -380,7 +380,7 @@ test("Slice 5: MCP/OAuth routes remain unavailable on Portal host", async () => 
     assert.equal((await httpRequest(port, config.portalHost, "/auth")).status, 404);
     assert.equal((await httpRequest(port, config.portalHost, "/v1/me")).status, 404);
     assert.equal(isPortalHostAllowedPath("GET", "/connect/claude"), true);
-    assert.equal(isPortalHostAllowedPath("GET", "/connect/chatgpt"), false);
+    assert.equal(isPortalHostAllowedPath("GET", "/connect/chatgpt"), true);
     assert.equal(isPortalHostAllowedPath("POST", "/v1/auth/clerk"), true);
   });
 });

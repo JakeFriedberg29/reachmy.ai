@@ -672,8 +672,8 @@ Execute in order.
 | **4** | `listPortalAiConnections` + `GET /v1/portal/overview` | Safe JSON — **complete** |
 | **5** | Portal UI: sign-in, home, account + shared Portal style system | Sign-in on app host — **complete** |
 | **6** | `/connect/claude` + prefilled URL (no handoff) | Claude E2E — **complete** |
-| **7** | `/connect/chatgpt` guided page | Honest alpha steps |
-| **8** | Disconnect modal + CSRF middleware + `POST /v1/portal/connections/:provider/disconnect` | Revoke all provider grants |
+| **7** | `/connect/chatgpt` guided page | Honest alpha steps — **complete** |
+| **8** | Disconnect modal + CSRF middleware + `POST /v1/portal/connections/:provider/disconnect` | Revoke all provider grants — **complete** |
 | **9** | Clerk Production + subdomain allowlist + `authorizedParties` + Railway `app` DNS + Framer link | Production validation §17 |
 | **10** | `scripts/portal-smoke.ts` + `docs/phase3-validation.md` template | CI green |
 

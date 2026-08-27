@@ -16,9 +16,12 @@ import {
 import { isPortalHostAllowedPath } from "../src/http/host.js";
 import {
   REACHMY_MCP_CONNECTOR_URL,
-  claudePrefillConnectorUrl,
+  portalCopyableUrl,
   portalLayout,
+  portalSetupNote,
+  portalSetupSteps,
   portalStyles,
+  renderPortalConnectChatGPT,
   renderPortalConnectClaude,
 } from "../src/http/portal-ui.js";
 import { createHttpServer } from "../src/server.js";
@@ -134,159 +137,156 @@ async function seedAiConnection(
   return connectionId;
 }
 
-function extractContinueHref(html: string): string {
-  const match = html.match(/href="(https:\/\/claude\.ai\/customize\/connectors[^"]*)"/);
-  assert.ok(match?.[1], "expected Continue to Claude href");
-  return match[1]!.replaceAll("&amp;", "&");
-}
-
-test("Slice 6: Claude prefilled connector URL is canonical and has no account identifiers", () => {
+test("Slice 7: shared setup helpers and ChatGPT page reuse Portal styles", () => {
   assert.equal(REACHMY_MCP_CONNECTOR_URL, "https://mcp.reachmy.ai/mcp");
-  const url = claudePrefillConnectorUrl();
-  assert.equal(
-    url,
-    "https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=ReachMy&connectorUrl=https%3A%2F%2Fmcp.reachmy.ai%2Fmcp",
+  assert.match(portalSetupSteps(["One", "Two"]), /rm-steps/);
+  assert.match(
+    portalCopyableUrl({ label: "URL", value: REACHMY_MCP_CONNECTOR_URL }),
+    /value="https:\/\/mcp\.reachmy\.ai\/mcp"/,
   );
-  const parsed = new URL(url);
-  assert.equal(parsed.origin, "https://claude.ai");
-  assert.equal(parsed.pathname, "/customize/connectors");
-  assert.equal(parsed.searchParams.get("modal"), "add-custom-connector");
-  assert.equal(parsed.searchParams.get("connectorName"), "ReachMy");
-  assert.equal(parsed.searchParams.get("connectorUrl"), "https://mcp.reachmy.ai/mcp");
-  assert.doesNotMatch(url, /account|principal|grant|uuid|clerk/i);
-  assert.doesNotMatch(url, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-});
-
-test("Slice 6: Connect Claude page reuses Portal layout and styles", () => {
-  const html = renderPortalConnectClaude();
-  assert.match(html, /Connect Claude/);
-  assert.match(html, /Continue to Claude/);
-  assert.match(html, /rm-card/);
-  assert.match(html, /rm-btn--primary/);
-  assert.match(html, /ReachMy/);
+  assert.match(portalSetupNote("Tip"), /rm-note/);
+  assert.match(portalStyles(), /\.rm-steps/);
+  assert.match(portalStyles(), /\.rm-copy-row/);
   assert.match(portalLayout({ title: "T", body: "<p>x</p>", active: "home" }), /rm-shell/);
-  assert.match(portalStyles(), /\.rm-btn--primary/);
-  const href = extractContinueHref(html);
-  assert.equal(href, claudePrefillConnectorUrl());
-  assert.equal(new URL(href).searchParams.get("connectorUrl"), REACHMY_MCP_CONNECTOR_URL);
+
+  const html = renderPortalConnectChatGPT();
+  assert.match(html, /Connect ChatGPT/);
+  assert.match(html, /rm-card/);
+  assert.match(html, /Developer Mode/);
+  assert.match(html, /ReachMy connection URL/);
+  assert.match(html, /value="https:\/\/mcp\.reachmy\.ai\/mcp"/);
+  assert.match(html, /Copy/);
+  assert.match(html, /Enable ReachMy/);
+  assert.match(html, /return here and refresh/i);
+  assert.doesNotMatch(html, /grant_id|oauth_client_id|principal_id|DCR|OIDC/i);
+  assert.doesNotMatch(html, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+
+  const claude = renderPortalConnectClaude();
+  assert.match(claude, /Continue to Claude/);
+  assert.match(claude, /claude\.ai\/customize\/connectors/);
 });
 
-test("Slice 6: unauthenticated /connect/claude redirects to sign-in", async () => {
+test("Slice 7: unauthenticated /connect/chatgpt redirects to sign-in", async () => {
   await withServer(async (port, config) => {
-    const res = await httpRequest(port, config.portalHost, "/connect/claude");
+    const res = await httpRequest(port, config.portalHost, "/connect/chatgpt");
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, "/sign-in?redirect=%2Fconnect%2Fclaude");
+    assert.equal(res.headers.location, "/sign-in?redirect=%2Fconnect%2Fchatgpt");
   });
 });
 
-test("Slice 6: authenticated user gets Connect Claude setup page", async () => {
+test("Slice 7: authenticated user gets ChatGPT setup page", async () => {
   await withServer(async (port, config) => {
     const db = await testDb();
     const tag = suffix();
     const account = await upsertAccountByClerkUser(db, {
-      clerkUserId: `connect_claude_${tag}`,
-      email: `claude_${tag}@example.test`,
+      clerkUserId: `connect_chatgpt_${tag}`,
+      email: `chatgpt_${tag}@example.test`,
     });
-    const res = await httpRequest(port, config.portalHost, "/connect/claude", {
+    const res = await httpRequest(port, config.portalHost, "/connect/chatgpt", {
       cookie: sessionCookie(account.account_id, config.cookieKeys[0]!),
     });
     assert.equal(res.status, 200);
     assert.match(res.headers["content-type"] ?? "", /text\/html/);
-    assert.match(res.body, /Connect Claude/);
-    assert.match(res.body, /Continue to Claude/);
+    assert.match(res.body, /Connect ChatGPT/);
+    assert.match(res.body, /Open ChatGPT settings/);
+    assert.match(res.body, /Developer Mode/);
+    assert.match(res.body, /custom app or connector/i);
+    assert.match(res.body, /Use the name ReachMy/);
+    assert.match(res.body, /value="https:\/\/mcp\.reachmy\.ai\/mcp"/);
+    assert.match(res.body, /Complete ReachMy sign-in/);
+    assert.match(res.body, /Enable ReachMy in your conversation/);
+    assert.match(res.body, /start a new chat/i);
     assert.match(res.body, /rm-card/);
-    assert.match(res.body, /return here and refresh/i);
-    const href = extractContinueHref(res.body);
-    assert.equal(href, claudePrefillConnectorUrl());
-    assert.equal(new URL(href).searchParams.get("connectorUrl"), "https://mcp.reachmy.ai/mcp");
+    assert.match(res.body, /data-copy-target/);
     assert.doesNotMatch(res.body, /grant_id|oauth_client_id|agent_connection_id|principal_id/i);
-    assert.doesNotMatch(href, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   });
 });
 
-test("Slice 6: provisional / unclaimed user can access Connect Claude", async () => {
+test("Slice 7: provisional / unclaimed user can access Connect ChatGPT", async () => {
   await withServer(async (port, config) => {
     const db = await testDb();
     const tag = suffix();
-    const account = await upsertAccountByClerkUser(db, { clerkUserId: `prov_connect_${tag}` });
+    const account = await upsertAccountByClerkUser(db, { clerkUserId: `prov_chatgpt_${tag}` });
     await ensureProvisionalPrincipal(db, account.account_id);
-    const res = await httpRequest(port, config.portalHost, "/connect/claude", {
+    const res = await httpRequest(port, config.portalHost, "/connect/chatgpt", {
       cookie: sessionCookie(account.account_id, config.cookieKeys[0]!),
     });
     assert.equal(res.status, 200);
-    assert.match(res.body, /Continue to Claude/);
+    assert.match(res.body, /Connect ChatGPT/);
+    assert.match(res.body, /value="https:\/\/mcp\.reachmy\.ai\/mcp"/);
   });
 });
 
-test("Slice 6: home shows Connect Claude when Claude is not connected", async () => {
+test("Slice 7: home shows Connect ChatGPT when ChatGPT is not connected", async () => {
   await withServer(async (port, config) => {
     const db = await testDb();
     const tag = suffix();
-    const account = await upsertAccountByClerkUser(db, { clerkUserId: `home_claude_off_${tag}` });
+    const account = await upsertAccountByClerkUser(db, { clerkUserId: `home_chatgpt_off_${tag}` });
     const res = await httpRequest(port, config.portalHost, "/", {
       cookie: sessionCookie(account.account_id, config.cookieKeys[0]!),
     });
     assert.equal(res.status, 200);
-    assert.match(res.body, /Connect Claude/);
-    assert.match(res.body, /href="\/connect\/claude"/);
     assert.match(res.body, /Connect ChatGPT/);
     assert.match(res.body, /href="\/connect\/chatgpt"/);
+    assert.match(res.body, /Connect Claude/);
+    assert.match(res.body, /href="\/connect\/claude"/);
   });
 });
 
-test("Slice 6: home shows Connected when Claude is connected; ChatGPT connect still available", async () => {
+test("Slice 7: home shows Connected when ChatGPT is connected; Claude unchanged", async () => {
   await withServer(async (port, config) => {
     const db = await testDb();
     const tag = suffix();
-    const handle = `c6_${tag}`.slice(0, 30);
-    const account = await upsertAccountByClerkUser(db, { clerkUserId: `home_claude_on_${tag}` });
-    const identity = await createIdentity(db, account.account_id, { handle, displayName: "C6" });
+    const handle = `c7_${tag}`.slice(0, 30);
+    const account = await upsertAccountByClerkUser(db, { clerkUserId: `home_chatgpt_on_${tag}` });
+    const identity = await createIdentity(db, account.account_id, { handle, displayName: "C7" });
     await seedAiConnection(db, identity.principal_id!, {
-      clientPayload: { client_name: "Claude" },
-      grantId: `grant_claude_c6_${tag}`,
+      clientPayload: { client_name: "ChatGPT" },
+      grantId: `grant_chatgpt_c7_${tag}`,
     });
     const res = await httpRequest(port, config.portalHost, "/", {
       cookie: sessionCookie(account.account_id, config.cookieKeys[0]!),
     });
     assert.equal(res.status, 200);
     assert.match(res.body, /Connected/);
-    assert.match(res.body, /Connect ChatGPT/);
-    assert.doesNotMatch(res.body, /href="\/connect\/claude"/);
+    assert.match(res.body, /Connect Claude/);
+    assert.match(res.body, /href="\/connect\/claude"/);
+    assert.doesNotMatch(res.body, /href="\/connect\/chatgpt"/);
   });
 });
 
-test("Slice 6: MCP/script tokens cannot authenticate /connect/claude", async () => {
+test("Slice 7: MCP/script tokens cannot authenticate /connect/chatgpt", async () => {
   await withServer(async (port, config) => {
     const db = await testDb();
-    const { identity } = await makeGrantPrincipal(db, "oauth_connect_claude", "Claude");
+    const { identity } = await makeGrantPrincipal(db, "oauth_connect_chatgpt", "ChatGPT");
     const oauthToken = await obtainOAuthAccessToken(port, config, identity.account_id);
     const script = mintScriptToken(identity.account_id, config.cookieKeys[0]!);
 
-    const oauthRes = await httpRequest(port, config.portalHost, "/connect/claude", {
+    const oauthRes = await httpRequest(port, config.portalHost, "/connect/chatgpt", {
       authorization: `Bearer ${oauthToken}`,
     });
     assert.equal(oauthRes.status, 302);
-    assert.equal(oauthRes.headers.location, "/sign-in?redirect=%2Fconnect%2Fclaude");
+    assert.equal(oauthRes.headers.location, "/sign-in?redirect=%2Fconnect%2Fchatgpt");
 
-    const scriptRes = await httpRequest(port, config.portalHost, "/connect/claude", {
+    const scriptRes = await httpRequest(port, config.portalHost, "/connect/chatgpt", {
       authorization: `Bearer ${script}`,
     });
     assert.equal(scriptRes.status, 302);
-    assert.equal(scriptRes.headers.location, "/sign-in?redirect=%2Fconnect%2Fclaude");
+    assert.equal(scriptRes.headers.location, "/sign-in?redirect=%2Fconnect%2Fchatgpt");
   });
 });
 
-test("Slice 6: /connect/claude is not exposed on MCP host", async () => {
+test("Slice 7: /connect/chatgpt is not exposed on MCP host", async () => {
   await withServer(async (port, config) => {
     const mcpHost = new URL(config.publicUrl).hostname;
-    const res = await httpRequest(port, mcpHost, "/connect/claude");
+    const res = await httpRequest(port, mcpHost, "/connect/chatgpt");
     assert.notEqual(res.status, 200);
-    assert.doesNotMatch(res.body, /Continue to Claude/);
-    assert.equal(isPortalHostAllowedPath("GET", "/connect/claude"), true);
+    assert.doesNotMatch(res.body, /Connect ChatGPT/);
+    assert.equal(isPortalHostAllowedPath("GET", "/connect/chatgpt"), true);
   });
 });
 
-test("Slice 6: MCP/OAuth routes remain unavailable on Portal host", async () => {
+test("Slice 7: MCP/OAuth routes remain unavailable on Portal host", async () => {
   await withServer(async (port, config) => {
     assert.equal((await httpRequest(port, config.portalHost, "/mcp", { method: "POST" })).status, 404);
     assert.equal((await httpRequest(port, config.portalHost, "/auth")).status, 404);

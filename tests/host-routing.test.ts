@@ -75,10 +75,23 @@ test("isPortalHostAllowedPath allows Portal pages, overview, and Clerk auth", ()
   assert.equal(isPortalHostAllowedPath("GET", "/sign-in"), true);
   assert.equal(isPortalHostAllowedPath("GET", "/account"), true);
   assert.equal(isPortalHostAllowedPath("GET", "/connect/claude"), true);
+  assert.equal(isPortalHostAllowedPath("GET", "/connect/chatgpt"), true);
   assert.equal(isPortalHostAllowedPath("GET", "/v1/portal/overview"), true);
   assert.equal(isPortalHostAllowedPath("POST", "/v1/auth/clerk"), true);
   assert.equal(isPortalHostAllowedPath("POST", "/sign-out"), true);
+  assert.equal(
+    isPortalHostAllowedPath("POST", "/v1/portal/connections/claude/disconnect"),
+    true,
+  );
+  assert.equal(
+    isPortalHostAllowedPath("POST", "/v1/portal/connections/chatgpt/disconnect"),
+    true,
+  );
   assert.equal(isPortalHostAllowedPath("POST", "/health"), false);
-  assert.equal(isPortalHostAllowedPath("GET", "/connect/chatgpt"), false);
+  assert.equal(isPortalHostAllowedPath("GET", "/connect/discord"), false);
   assert.equal(isPortalHostAllowedPath("POST", "/v1/me"), false);
+  assert.equal(
+    isPortalHostAllowedPath("GET", "/v1/portal/connections/claude/disconnect"),
+    false,
+  );
 });

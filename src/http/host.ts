@@ -60,6 +60,12 @@ export function isPortalHostAllowedPath(method: string, pathname: string): boole
   if (method === "GET" && pathname === "/v1/portal/overview") return true;
   if (method === "POST" && pathname === "/v1/auth/clerk") return true;
   if (method === "POST" && pathname === "/sign-out") return true;
+  if (
+    method === "POST" &&
+    /^\/v1\/portal\/connections\/(claude|chatgpt)\/disconnect$/.test(pathname)
+  ) {
+    return true;
+  }
   if (method !== "GET") return false;
   return (
     pathname === "/" ||
@@ -67,7 +73,8 @@ export function isPortalHostAllowedPath(method: string, pathname: string): boole
     pathname === "/admin" ||
     pathname === "/sign-in" ||
     pathname === "/account" ||
-    pathname === "/connect/claude"
+    pathname === "/connect/claude" ||
+    pathname === "/connect/chatgpt"
   );
 }
 

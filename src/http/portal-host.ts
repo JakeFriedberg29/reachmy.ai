@@ -12,10 +12,13 @@ import { accounts } from "../db/schema.js";
 import { DomainError } from "../domain/errors.js";
 import { upsertAccountByClerkUser } from "../domain/identity.js";
 import { toPortalOverviewResponse, listPortalAiConnections } from "../domain/portal-connections.js";
+import { disconnectPortalProvider, parsePortalProvider } from "../domain/portal-disconnect.js";
 import { requirePlatformAdmin } from "../domain/platform-admin.js";
+import { isAllowedPortalMutationOrigin, mintPortalCsrfToken, verifyPortalCsrfToken } from "./portal-csrf.js";
 import { resolveHumanPortalAccountIdFromRequest } from "./portal-request.js";
 import {
   renderPortalAccount,
+  renderPortalConnectChatGPT,
   renderPortalConnectClaude,
   renderPortalHome,
   renderPortalSignIn,
@@ -70,7 +73,7 @@ export function respondPortalHealth(res: ServerResponse, config: AppConfig): voi
   sendJson(res, 200, {
     ok: true,
     phase: 3,
-    slice: 6,
+    slice: 8,
     surface: "portal",
     portal_url: config.portalUrl,
     issuer: config.publicUrl,
@@ -121,7 +124,18 @@ export async function handlePortalHome(
     return;
   }
   const view = await listPortalAiConnections(db, accountId);
-  sendHtml(res, 200, renderPortalHome(toPortalOverviewResponse(view)));
+  sendHtml(
+    res,
+    200,
+    renderPortalHome({
+      overview: toPortalOverviewResponse(view),
+      csrfToken: mintPortalCsrfToken(accountId, config.cookieKeys[0]!),
+      activeGrantCountByProvider: {
+        claude: view.connectionIdsByProvider.claude.length,
+        chatgpt: view.connectionIdsByProvider.chatgpt.length,
+      },
+    }),
+  );
 }
 
 export async function handlePortalSignIn(
@@ -154,6 +168,20 @@ export async function handlePortalConnectClaude(
   sendHtml(res, 200, renderPortalConnectClaude());
 }
 
+export async function handlePortalConnectChatGPT(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: AppConfig,
+  db: Database,
+): Promise<void> {
+  const accountId = await resolveHumanPortalAccountIdFromRequest(req, config, db);
+  if (!accountId) {
+    redirect(res, `/sign-in?redirect=${encodeURIComponent("/connect/chatgpt")}`);
+    return;
+  }
+  sendHtml(res, 200, renderPortalConnectChatGPT());
+}
+
 export async function handlePortalAccount(
   req: IncomingMessage,
   res: ServerResponse,
@@ -180,6 +208,66 @@ export async function handlePortalAccount(
       agentName: overview.agent_name_status === "claimed" ? overview.agent_name : null,
     }),
   );
+}
+
+export async function handlePortalDisconnect(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: AppConfig,
+  db: Database,
+  providerRaw: string,
+): Promise<void> {
+  const accountId = await resolveHumanPortalAccountIdFromRequest(req, config, db);
+  if (!accountId) {
+    respondPortalUnauthorized(res);
+    return;
+  }
+
+  if (!isAllowedPortalMutationOrigin(typeof req.headers.origin === "string" ? req.headers.origin : undefined, config)) {
+    sendJson(res, 403, { error: "forbidden", message: "Invalid origin" });
+    return;
+  }
+
+  const provider = parsePortalProvider(providerRaw);
+  if (!provider) {
+    respondPortalNotFound(res);
+    return;
+  }
+
+  const raw = await readBody(req);
+  let csrfFromBody: string | null = null;
+  try {
+    const body = JSON.parse(raw || "{}") as { _csrf?: unknown };
+    csrfFromBody = typeof body._csrf === "string" ? body._csrf : null;
+  } catch {
+    // Also accept form-encoded _csrf
+    if (raw.includes("_csrf=")) {
+      const params = new URLSearchParams(raw);
+      csrfFromBody = params.get("_csrf");
+    }
+  }
+  const csrfHeader = typeof req.headers["x-csrf-token"] === "string" ? req.headers["x-csrf-token"] : null;
+  const csrfToken = csrfHeader ?? csrfFromBody;
+  if (!verifyPortalCsrfToken(accountId, csrfToken, config.cookieKeys[0]!)) {
+    sendJson(res, 403, { error: "forbidden", message: "Invalid CSRF token" });
+    return;
+  }
+
+  try {
+    const result = await disconnectPortalProvider(db, accountId, provider);
+    sendJson(res, 200, {
+      ok: true,
+      provider,
+      revoked_count: result.revokedCount,
+      already_disconnected: result.alreadyDisconnected,
+    });
+  } catch (error) {
+    if (error instanceof DomainError) {
+      sendJson(res, error.status, { error: error.code, message: error.message });
+      return;
+    }
+    sendJson(res, 500, { error: "internal_error", message: "Internal error" });
+  }
 }
 
 export async function handlePortalSignOut(
@@ -317,6 +405,15 @@ export async function dispatchPortalRequest(
   }
   if (method === "GET" && path === "/connect/claude") {
     await handlePortalConnectClaude(req, res, config, db);
+    return;
+  }
+  if (method === "GET" && path === "/connect/chatgpt") {
+    await handlePortalConnectChatGPT(req, res, config, db);
+    return;
+  }
+  const disconnectMatch = path.match(/^\/v1\/portal\/connections\/(claude|chatgpt)\/disconnect$/);
+  if (method === "POST" && disconnectMatch) {
+    await handlePortalDisconnect(req, res, config, db, disconnectMatch[1]!);
     return;
   }
   if (method === "GET" && path === "/admin") {

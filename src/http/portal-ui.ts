@@ -279,6 +279,34 @@ export function portalStyles(): string {
     }
     .rm-textarea { min-height: 6rem; resize: vertical; }
 
+    .rm-steps {
+      margin: 0 0 var(--rm-space-3);
+      padding-left: 1.25rem;
+      display: grid;
+      gap: var(--rm-space-2);
+    }
+    .rm-steps li { padding-left: 0.15rem; }
+    .rm-copy-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--rm-space-2);
+      align-items: stretch;
+    }
+    .rm-copy-row .rm-input {
+      flex: 1 1 12rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9rem;
+    }
+    .rm-note {
+      margin: 0 0 var(--rm-space-3);
+      padding: 0.85rem 1rem;
+      background: var(--rm-accent-soft);
+      border: 1px solid #c6e4d3;
+      border-radius: var(--rm-radius-sm);
+      color: var(--rm-muted);
+      font-size: 0.92rem;
+    }
+
     .rm-modal-backdrop {
       position: fixed;
       inset: 0;
@@ -326,6 +354,7 @@ export function portalStyles(): string {
       }
       .rm-connection-actions { width: 100%; }
       .rm-connection-actions .rm-btn { width: 100%; }
+      .rm-copy-row .rm-btn { width: 100%; }
       .rm-modal__actions { flex-direction: column-reverse; }
       .rm-modal__actions .rm-btn { width: 100%; }
     }
@@ -515,6 +544,55 @@ export function renderPortalProviderSetup(opts: {
   });
 }
 
+export function portalSetupSteps(steps: string[]): string {
+  const items = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
+  return `<ol class="rm-steps">${items}</ol>`;
+}
+
+export function portalCopyableUrl(opts: {
+  label: string;
+  value: string;
+  inputId?: string;
+}): string {
+  const id = opts.inputId ?? "rm-connector-url";
+  return `
+    <div class="rm-field">
+      ${portalLabel(opts.label, id)}
+      <div class="rm-copy-row">
+        <input class="rm-input" id="${escapeHtml(id)}" type="text" readonly value="${escapeHtml(opts.value)}" />
+        ${portalButton({
+          label: "Copy",
+          type: "button",
+          attrs: `data-copy-target="${escapeHtml(id)}"`,
+        })}
+      </div>
+    </div>
+    <script>
+      (function () {
+        const btn = document.querySelector('[data-copy-target="${id}"]');
+        const input = document.getElementById(${JSON.stringify(id)});
+        if (!btn || !input) return;
+        const label = btn.textContent;
+        btn.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(input.value);
+          } catch (_) {
+            input.focus();
+            input.select();
+            document.execCommand("copy");
+          }
+          btn.textContent = "Copied";
+          setTimeout(() => { btn.textContent = label; }, 1500);
+        });
+      })();
+    </script>
+  `;
+}
+
+export function portalSetupNote(text: string): string {
+  return `<p class="rm-note">${escapeHtml(text)}</p>`;
+}
+
 export function renderPortalConnectClaude(): string {
   const continueUrl = claudePrefillConnectorUrl();
   return renderPortalProviderSetup({
@@ -535,12 +613,40 @@ export function renderPortalConnectClaude(): string {
   });
 }
 
+export function renderPortalConnectChatGPT(): string {
+  return renderPortalProviderSetup({
+    title: "Connect ChatGPT",
+    lead: "Add ReachMy to ChatGPT so ChatGPT can represent you on the ReachMy network.",
+    bodyHtml: `
+      ${portalSetupSteps([
+        "Open ChatGPT settings.",
+        "Turn on Developer Mode if it is not already enabled.",
+        "Add a custom app or connector.",
+        "Use the name ReachMy.",
+        "Paste the ReachMy connection URL below.",
+        "Complete ReachMy sign-in when ChatGPT asks you to authorize.",
+        "Enable ReachMy in your conversation if ChatGPT requires it.",
+      ])}
+      ${portalCopyableUrl({
+        label: "ReachMy connection URL",
+        value: REACHMY_MCP_CONNECTOR_URL,
+        inputId: "rm-chatgpt-connector-url",
+      })}
+      ${portalSetupNote(
+        "If ReachMy is connected but its actions do not show up, refresh the connection, start a new chat, or enable ReachMy for that conversation.",
+      )}
+      <p class="rm-hint">After connecting ReachMy in ChatGPT, return here and refresh to see the updated status.</p>
+    `,
+  });
+}
+
 function connectionAction(row: PortalConnectionRow): string {
   if (row.status === "connected") {
     return portalButton({
       label: "Disconnect",
-      disabled: true,
-      attrs: 'title="Coming in a later slice"',
+      variant: "danger",
+      type: "button",
+      attrs: `data-disconnect-open="${escapeHtml(row.provider)}"`,
     });
   }
   if (row.provider === "claude") {
@@ -550,6 +656,13 @@ function connectionAction(row: PortalConnectionRow): string {
       href: "/connect/claude",
     });
   }
+  if (row.provider === "chatgpt") {
+    return portalButton({
+      label: "Connect ChatGPT",
+      variant: "primary",
+      href: "/connect/chatgpt",
+    });
+  }
   return portalButton({
     label: "Coming next",
     disabled: true,
@@ -557,7 +670,12 @@ function connectionAction(row: PortalConnectionRow): string {
   });
 }
 
-export function renderPortalHome(overview: PortalOverview): string {
+export function renderPortalHome(opts: {
+  overview: PortalOverview;
+  csrfToken: string;
+  activeGrantCountByProvider: Record<"claude" | "chatgpt", number>;
+}): string {
+  const { overview, csrfToken, activeGrantCountByProvider } = opts;
   const agentName =
     overview.agent_name_status === "claimed" && overview.agent_name
       ? `<p class="rm-value">${escapeHtml(overview.agent_name)}</p>`
@@ -578,6 +696,78 @@ export function renderPortalHome(overview: PortalOverview): string {
     )
     .join("");
 
+  const disconnectScript = `
+    <script>
+      (function () {
+        const csrfToken = ${JSON.stringify(csrfToken)};
+        const agentName = ${JSON.stringify(overview.agent_name)};
+        const claimed = ${JSON.stringify(overview.agent_name_status === "claimed")};
+        const grantCounts = ${JSON.stringify(activeGrantCountByProvider)};
+        const labels = { claude: "Claude", chatgpt: "ChatGPT" };
+        const backdrop = document.getElementById("rm-disconnect-modal");
+        const titleEl = document.getElementById("rm-disconnect-modal-title");
+        const bodyEl = document.getElementById("rm-disconnect-body");
+        const confirmBtn = document.getElementById("rm-disconnect-confirm");
+        const cancelBtn = document.getElementById("rm-disconnect-cancel");
+        let activeProvider = null;
+
+        function closeModal() {
+          if (!backdrop) return;
+          backdrop.hidden = true;
+          activeProvider = null;
+        }
+
+        function openModal(provider) {
+          activeProvider = provider;
+          const label = labels[provider] || provider;
+          const count = grantCounts[provider] || 0;
+          titleEl.textContent = "Disconnect " + label + "?";
+          let body = claimed && agentName
+            ? ("Disconnect " + label + " from " + agentName + "?")
+            : ("Disconnect " + label + " from your ReachMy account?");
+          body += " " + label + " will immediately lose permission to act through ReachMy.";
+          if (count > 1) {
+            body += " This will disconnect all " + label + " sessions.";
+          }
+          bodyEl.textContent = body;
+          backdrop.hidden = false;
+        }
+
+        document.querySelectorAll("[data-disconnect-open]").forEach((btn) => {
+          btn.addEventListener("click", () => openModal(btn.getAttribute("data-disconnect-open")));
+        });
+        cancelBtn?.addEventListener("click", closeModal);
+        backdrop?.addEventListener("click", (event) => {
+          if (event.target === backdrop) closeModal();
+        });
+        confirmBtn?.addEventListener("click", async () => {
+          if (!activeProvider) return;
+          confirmBtn.disabled = true;
+          try {
+            const res = await fetch("/v1/portal/connections/" + activeProvider + "/disconnect", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-csrf-token": csrfToken,
+              },
+              body: "{}",
+            });
+            if (!res.ok) {
+              const payload = await res.json().catch(() => ({}));
+              alert(payload.message || "Could not disconnect. Please try again.");
+              confirmBtn.disabled = false;
+              return;
+            }
+            window.location.reload();
+          } catch (_) {
+            alert("Could not disconnect. Please try again.");
+            confirmBtn.disabled = false;
+          }
+        });
+      })();
+    </script>
+  `;
+
   return portalLayout({
     title: "ReachMy",
     active: "home",
@@ -589,6 +779,26 @@ export function renderPortalHome(overview: PortalOverview): string {
         title: "Your AI Connections",
         body: `<div class="rm-connection-list">${rows}</div>`,
       }),
+      portalModal({
+        id: "rm-disconnect-modal",
+        title: "Disconnect?",
+        bodyHtml: `<p id="rm-disconnect-body"></p>`,
+        actionsHtml: [
+          portalButton({
+            label: "Cancel",
+            variant: "secondary",
+            type: "button",
+            attrs: 'id="rm-disconnect-cancel"',
+          }),
+          portalButton({
+            label: "Disconnect",
+            variant: "danger",
+            type: "button",
+            attrs: 'id="rm-disconnect-confirm"',
+          }),
+        ].join(""),
+      }),
+      disconnectScript,
     ].join(""),
   });
 }

@@ -132,8 +132,9 @@ export async function listPortalAiConnections(
     );
     if (!provider) continue;
 
-    connectionIdsByProvider[provider].push(row.id);
+    // Disconnect targets only active grants — revoked rows stay out of this list.
     if (row.status === "connected") {
+      connectionIdsByProvider[provider].push(row.id);
       const slot = overview.connections.find((entry) => entry.provider === provider);
       if (slot) slot.status = "connected";
     }
