@@ -7,6 +7,7 @@ import {
   sessionCookieHeader,
 } from "../auth/session-cookie.js";
 import type { AppConfig } from "../config.js";
+import { safeReturnPath } from "./host.js";
 import type { Database } from "../db/client.js";
 import { accounts } from "../db/schema.js";
 import { DomainError } from "../domain/errors.js";
@@ -53,12 +54,6 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
-}
-
-function safeReturnPath(raw: string | null | undefined): string {
-  if (!raw) return "/";
-  if (!raw.startsWith("/") || raw.startsWith("//")) return "/";
-  return raw;
 }
 
 export function respondPortalInvalidHost(res: ServerResponse): void {
@@ -146,7 +141,10 @@ export async function handlePortalSignIn(
 ): Promise<void> {
   const accountId = await resolveHumanPortalAccountIdFromRequest(req, config, db);
   const url = new URL(req.url ?? "/sign-in", config.portalUrl);
-  const redirectTo = safeReturnPath(url.searchParams.get("redirect") ?? url.searchParams.get("return"));
+  const redirectTo = safeReturnPath(
+    url.searchParams.get("redirect") ?? url.searchParams.get("return"),
+    "/",
+  );
   if (accountId) {
     redirect(res, redirectTo);
     return;

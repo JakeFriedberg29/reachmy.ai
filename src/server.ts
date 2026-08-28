@@ -19,6 +19,7 @@ import {
   isMcpBackendPath,
   isPortalHostAllowedPath,
   normalizeHostname,
+  safeReturnPath,
 } from "./http/host.js";
 import {
   dispatchPortalRequest,
@@ -102,7 +103,7 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
   app.get("/.well-known/oauth-protected-resource/mcp", (c) => c.json(protectedResourceMetadata));
 
   app.get("/sign-in", async (c) => {
-    const redirect = c.req.query("redirect") || "/security";
+    const redirect = safeReturnPath(c.req.query("redirect"), "/security");
     const resolved = await resolveBrowserAccountId(c.req.raw, config, db);
     if (resolved) {
       if (resolved.mintedSession) {

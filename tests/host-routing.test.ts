@@ -7,6 +7,7 @@ import {
   isPortalHostAllowedPath,
   mcpHostnames,
   normalizeHostname,
+  safeReturnPath,
 } from "../src/http/host.js";
 
 function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -94,4 +95,31 @@ test("isPortalHostAllowedPath allows Portal pages, overview, and Clerk auth", ()
     isPortalHostAllowedPath("GET", "/v1/portal/connections/claude/disconnect"),
     false,
   );
+});
+
+test("safeReturnPath allows local relative paths", () => {
+  assert.equal(safeReturnPath("/"), "/");
+  assert.equal(safeReturnPath("/security"), "/security");
+  assert.equal(safeReturnPath("/account"), "/account");
+  assert.equal(safeReturnPath("/some/local/path"), "/some/local/path");
+  assert.equal(safeReturnPath("  /trimmed  "), "/trimmed");
+});
+
+test("safeReturnPath rejects external and dangerous redirects", () => {
+  assert.equal(safeReturnPath("https://evil.com"), "/");
+  assert.equal(safeReturnPath("http://evil.com"), "/");
+  assert.equal(safeReturnPath("//evil.com"), "/");
+  assert.equal(safeReturnPath("/\\evil.com"), "/");
+  assert.equal(safeReturnPath("javascript:alert(1)"), "/");
+  assert.equal(safeReturnPath("/javascript:alert(1)"), "/");
+  assert.equal(safeReturnPath("/security\nLocation: https://evil.com"), "/");
+  assert.equal(safeReturnPath("/security\r\nX-Injected: true"), "/");
+});
+
+test("safeReturnPath uses caller fallback", () => {
+  assert.equal(safeReturnPath(null), "/");
+  assert.equal(safeReturnPath(undefined), "/");
+  assert.equal(safeReturnPath(""), "/");
+  assert.equal(safeReturnPath("https://evil.com", "/security"), "/security");
+  assert.equal(safeReturnPath(null, "/security"), "/security");
 });

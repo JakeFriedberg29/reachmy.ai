@@ -86,3 +86,21 @@ export function isPortalSlice0Path(method: string, pathname: string): boolean {
 export function isLocalMcpHost(hostname: string): boolean {
   return LOCAL_MCP_HOSTS.has(hostname);
 }
+
+/**
+ * Sanitize a post-sign-in browser return path. Rejects off-origin redirects,
+ * protocol-relative URLs, backslash variants, javascript: URLs, and control
+ * characters that could inject response headers.
+ */
+export function safeReturnPath(raw: string | null | undefined, fallback = "/"): string {
+  if (raw == null) return fallback;
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+  if (!trimmed.startsWith("/")) return fallback;
+  if (trimmed.startsWith("//")) return fallback;
+  if (trimmed.includes("\\")) return fallback;
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("javascript:") || lower.startsWith("/javascript:")) return fallback;
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) return fallback;
+  return trimmed;
+}

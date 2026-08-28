@@ -10,6 +10,7 @@ import {
   SESSION_COOKIE,
 } from "./auth/session-cookie.js";
 import type { AppConfig } from "./config.js";
+import { safeReturnPath } from "./http/host.js";
 import type { Database } from "./db/client.js";
 import { getIdentityByAccountId } from "./domain/identity.js";
 import { acceptInvite } from "./domain/invites.js";
@@ -53,6 +54,7 @@ async function resolveInteractionAccountId(
 }
 
 export function renderSignIn(config: AppConfig, redirectTo: string): string {
+  const safeRedirect = safeReturnPath(redirectTo, "/security");
   const frontend = clerkFrontendApi(config.clerkPublishableKey);
   return htmlPage(
     "Sign in",
@@ -62,7 +64,7 @@ export function renderSignIn(config: AppConfig, redirectTo: string): string {
     <div id="clerk-app"></div>
     <script>
       const publishableKey = ${JSON.stringify(config.clerkPublishableKey)};
-      const redirectTo = ${JSON.stringify(redirectTo)};
+      const redirectTo = ${JSON.stringify(safeRedirect)};
       const clerkJs = ${JSON.stringify(`https://${frontend}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`)};
       const script = document.createElement("script");
       script.src = clerkJs;

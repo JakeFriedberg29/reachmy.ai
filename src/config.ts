@@ -24,6 +24,16 @@ function unique(values: Array<string | undefined>): string[] {
 /** Known production Neon compute endpoint — local/dev must not write here. */
 export const PRODUCTION_NEON_ENDPOINT_ID = "ep-tiny-violet-ayrr8l02";
 
+/** Development-only fallback when COOKIE_KEYS is unset locally. Never valid in production. */
+export const DEV_COOKIE_KEY_FALLBACK = "phase-minus1-dev-cookie-key-change-me";
+
+/** Placeholder from .env.example — never valid as a signing secret. */
+export const EXAMPLE_COOKIE_KEY_PLACEHOLDER = "change-me-to-a-long-random-string";
+
+export const MIN_COOKIE_KEY_LENGTH = 32;
+
+let warnedDevCookieKey = false;
+
 export function isRailwayRuntime(): boolean {
   return Boolean(
     process.env.RAILWAY_ENVIRONMENT ||
@@ -53,6 +63,81 @@ export function assertSafeDatabaseUrl(databaseUrl: string, opts?: { onRailway?: 
       "Refusing to run local development against production database " +
         `(${PRODUCTION_NEON_ENDPOINT_ID}). Use the Neon development branch endpoint, ` +
         "or set ALLOW_PRODUCTION_DB=1 only for an explicit emergency.",
+    );
+  }
+}
+
+/**
+ * Production when running on Railway or when PUBLIC_URL is HTTPS on a non-localhost host.
+ */
+export function isProductionRuntime(
+  publicUrl: string,
+  opts?: { onRailway?: boolean },
+): boolean {
+  const onRailway = opts?.onRailway ?? isRailwayRuntime();
+  if (onRailway) return true;
+  try {
+    const url = new URL(publicUrl);
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    return host !== "localhost" && host !== "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
+export function parseCookieKeys(raw: string | undefined, fallback: string): string[] {
+  const source = raw?.trim() ? raw : fallback;
+  return source
+    .split(",")
+    .map((key) => key.trim())
+    .filter(Boolean);
+}
+
+export function isUnsafeCookieKey(key: string): boolean {
+  const trimmed = key.trim();
+  if (!trimmed) return true;
+  if (trimmed.length < MIN_COOKIE_KEY_LENGTH) return true;
+  if (trimmed === DEV_COOKIE_KEY_FALLBACK) return true;
+  if (trimmed === EXAMPLE_COOKIE_KEY_PLACEHOLDER) return true;
+  return false;
+}
+
+/**
+ * Fail closed in production: refuse default, missing, or weak COOKIE_KEYS.
+ * Local development may use the named dev fallback with a one-time warning.
+ */
+export function assertSafeCookieKeys(
+  cookieKeys: string[],
+  opts: { production: boolean; envProvided: boolean },
+): void {
+  const primary = cookieKeys[0] ?? "";
+  if (!opts.production) {
+    if (isUnsafeCookieKey(primary) && !warnedDevCookieKey) {
+      warnedDevCookieKey = true;
+      console.warn(
+        JSON.stringify({
+          msg: "cookie_keys_dev_fallback",
+          warning:
+            "COOKIE_KEYS is unset or uses a development placeholder. Set a long random COOKIE_KEYS in .env for local testing.",
+        }),
+      );
+    }
+    return;
+  }
+
+  if (!opts.envProvided) {
+    throw new Error(
+      "COOKIE_KEYS is required in production. Set a long random string (32+ characters) in Railway service variables.",
+    );
+  }
+  if (cookieKeys.length === 0) {
+    throw new Error("COOKIE_KEYS must contain at least one signing key in production.");
+  }
+  if (isUnsafeCookieKey(primary)) {
+    throw new Error(
+      "COOKIE_KEYS is missing, too short, or uses a known development default. " +
+        `Set a unique secret of at least ${MIN_COOKIE_KEY_LENGTH} characters in production.`,
     );
   }
 }
@@ -87,10 +172,11 @@ export function loadConfig(): AppConfig {
   const portalHost = hostnameOnly(process.env.PORTAL_HOST ?? "app.reachmy.ai");
   const portalUrl = stripTrailingSlash(process.env.PORTAL_URL ?? `https://${portalHost}`);
 
-  const cookieKeys = (process.env.COOKIE_KEYS ?? "phase-minus1-dev-cookie-key-change-me")
-    .split(",")
-    .map((k) => k.trim())
-    .filter(Boolean);
+  const cookieKeysEnv = process.env.COOKIE_KEYS;
+  const cookieKeysEnvProvided = Boolean(cookieKeysEnv?.trim());
+  const production = isProductionRuntime(publicUrl, { onRailway });
+  const cookieKeys = parseCookieKeys(cookieKeysEnv, DEV_COOKIE_KEY_FALLBACK);
+  assertSafeCookieKeys(cookieKeys, { production, envProvided: cookieKeysEnvProvided });
 
   const databaseUrl = required("DATABASE_URL");
   assertSafeDatabaseUrl(databaseUrl, { onRailway });

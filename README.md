@@ -22,7 +22,7 @@ Do not set Railway Root Directory to `apps/...`. There is no nested app.
 Required Railway variables:
 
 - `PUBLIC_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}` (or the hardcoded `https://reachmyai-production.up.railway.app`)
-- `COOKIE_KEYS` — long random string for OAuth cookies
+- `COOKIE_KEYS` — long random string (32+ characters) for session and OAuth cookie signing. Required in production; local dev may omit to use a named fallback with a startup warning.
 - `DATABASE_URL`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`
 
 Without `PUBLIC_URL`, `/health` and `/mcp` 403 on the Railway hostname and the OAuth issuer is `http://localhost:8080`.
@@ -55,4 +55,4 @@ pnpm install
 pnpm dev
 ```
 
-Required env: `PUBLIC_URL`, `COOKIE_KEYS`, `DATABASE_URL`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`.
+Required env: `PUBLIC_URL`, `DATABASE_URL`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`. `COOKIE_KEYS` is required in production (32+ characters); optional locally with a dev fallback warning.

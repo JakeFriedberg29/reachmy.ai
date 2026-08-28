@@ -1,10 +1,14 @@
 # ReachMy — Canonical Implementation Plan
 
-**Status:** Canonical as of 2026-08-19 (Portal / admin / AI-first Agent Name). Supersedes `/Users/Jake/Downloads/AGENT_NETWORK_IMPLEMENTATION_PLAN.md` (Frozen V1, 2026-08-15) for product direction and near-term phase sequence.
+**Status:** Canonical as of 2026-08-27 (Portal / admin / AI-first Agent Name). Supersedes `/Users/Jake/Downloads/AGENT_NETWORK_IMPLEMENTATION_PLAN.md` (Frozen V1, 2026-08-15) for product direction and near-term phase sequence.
 
-**This revision is documentation only.** No application code until this plan is reviewed. After approval, resume **Phase 2 Tests A/B only**. Do not start Phase 3 coding until a dedicated Phase 3 plan (`docs/plans/phase3-portal.md`) is written and approved.
+**Current execution state:**
 
-**Current execution state:** Phases -1, 0, 1, **2**, and **3** are complete. Reports: [`docs/phase2-validation.md`](phase2-validation.md), [`docs/phase3-validation.md`](phase3-validation.md). **Phase 4** (headless conversational UX) is next per [`docs/implementation-plan.md`](implementation-plan.md) §6 — not started.
+| Phase | Status |
+|---|---|
+| -1, 0, 1, 2, 3 | **Complete** — reports: [`phase-minus1-validation.md`](phase-minus1-validation.md), [`phase2-validation.md`](phase2-validation.md), [`phase3-validation.md`](phase3-validation.md) |
+| **3.5** | **Current** — security hardening & repository hygiene. Plan: [`docs/plans/phase3.5-security-hardening.md`](plans/phase3.5-security-hardening.md) |
+| 4 | **Not started** — headless conversational UX (§6) |
 
 Shipped schema, OAuth issuer/resource, domain services, and MCP tools remain as implemented unless a later approved phase changes them. This document does not reopen Phase 0/1 architecture.
 
@@ -216,6 +220,7 @@ Shipped browser surfaces on `mcp.reachmy.ai` today: `/sign-in` (Clerk JS), `/v1/
 |---|---|---|
 | Cross-provider interoperability | Phase 2 | Same domain/auth for Claude and ChatGPT; either side may initiate, receive, propose, or approve |
 | ReachMy Portal | Phase 3 | `app.reachmy.ai` setup, identity, connection visibility, security — not daily workflow |
+| Security hardening & repo hygiene | Phase 3.5 | OAuth consent, scope enforcement, CI, test harness — before broader rollout |
 | Provider installation / onboarding | Phase 3 | One ReachMy “connect AI” concept; Claude vs ChatGPT differ only at the install edge |
 | Agent Name onboarding / terminology | Phase 3 | AI-first `@name` claim after Connect; Portal shows claimed / not claimed |
 | Headless conversational UX | Phase 4 | Users never need tool names, IDs, internal statuses, or implementation terms |
@@ -325,7 +330,31 @@ Same Railway service, same Neon, same domain services. Framer stays on `reachmy.
 - [ ] Disconnect uses a confirmation step and existing `revokeAgentConnection`; Agent Name remains.
 - [ ] `/admin` is denied without a server-checked platform-admin role (including direct URL navigation).
 - [ ] No inbox/messaging/proposal/scheduling/chat/activity-feed UI.
-- [ ] MCP issuer/resource remain `https://mcp.reachmy.ai` and `https://mcp.reachmy.ai/mcp`.
+- [x] MCP issuer/resource remain `https://mcp.reachmy.ai` and `https://mcp.reachmy.ai/mcp`.
+
+**Status:** Complete. See [`docs/phase3-validation.md`](phase3-validation.md).
+
+#### Phase 3.5 — Security hardening & repository hygiene
+
+**Goal.** Harden security, authorization, deployment safety, and regression protection before broader rollout — without destabilizing Phase 3 or starting Phase 4 features.
+
+**Plan:** [`docs/plans/phase3.5-security-hardening.md`](plans/phase3.5-security-hardening.md) — **approved** 2026-08-27.
+
+**In scope (summary)**
+
+- MCP sign-in open redirect fix
+- Fail-closed production `COOKIE_KEYS`
+- Explicit OAuth consent (DCR stays open)
+- OAuth scope issuance and enforcement
+- CI / lint / format / test discovery
+- Shared HTTP test harness
+- Documentation and repository hygiene
+
+**Out of scope:** Portal rewrite, Hono migration, N+1/pagination, Phase 4 conversational UX, and items listed in the Phase 3.5 plan §9.
+
+**Exit criteria:** See Phase 3.5 plan §8. Claude and ChatGPT must still connect and operate.
+
+**Status:** **Current.** Slices 1–2 complete.
 
 #### Phase 4 — Headless conversational UX
 
@@ -440,11 +469,12 @@ Do not invent answers during implementation. Resolve at the start of the relevan
 ## 9. Coding start policy
 
 1. This document is the canonical roadmap/index. Review before any further implementation.
-2. After this review: resume **Phase 2 Tests A/B only**. No Portal coding. No `PUBLIC_URL` change.
-3. Phase 3 plan [`docs/plans/phase3-portal.md`](plans/phase3-portal.md) is approved (amended 2026-08-20). Implement per §19 slices; Clerk Production before production launch.
-4. Provider-specific code remains allowed only at the install/OAuth edge. Shared domain services stay provider-blind.
-5. When a later workstream starts, create its file under `docs/plans/` instead of growing this document.
-6. Implementation naming: Portal routes/components/services (`portal*`), never `controlCenter*`.
+2. **Phase 3.5** is the current phase. Implement per [`docs/plans/phase3.5-security-hardening.md`](plans/phase3.5-security-hardening.md) slices; one slice at a time.
+3. Phase 3 plan [`docs/plans/phase3-portal.md`](plans/phase3-portal.md) is complete. Do not reopen Portal scope without a new approved plan.
+4. **Phase 4** has not started. Do not begin headless conversational UX until Phase 3.5 closes.
+5. Provider-specific code remains allowed only at the install/OAuth edge. Shared domain services stay provider-blind.
+6. When a later workstream starts, create its file under `docs/plans/` instead of growing this document.
+7. Implementation naming: Portal routes/components/services (`portal*`), never `controlCenter*`.
 
 ---
 
@@ -474,4 +504,4 @@ Do not invent answers during implementation. Resolve at the start of the relevan
 
 ---
 
-*End of canonical plan. Next implementation, after review: remaining Phase 2 Tests A/B only.*
+*End of canonical plan. Current phase: **3.5** (security hardening). Phase 4 not started.*

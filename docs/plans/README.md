@@ -9,6 +9,7 @@ Product term: **ReachMy Portal** (`app.reachmy.ai`). Do not use “Control Cente
 
 | Plan | Path |
 |---|---|
+| Phase 3.5 security hardening (current) | `docs/plans/phase3.5-security-hardening.md` |
 | Phase 3 Portal (detailed, after Phase 2) | `docs/plans/phase3-portal.md` |
 | Security & privacy guardrails | `docs/plans/security-privacy.md` |
 | Conversational UX / response tone | `docs/plans/conversational-ux.md` |

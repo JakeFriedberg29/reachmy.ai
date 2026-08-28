@@ -5,7 +5,7 @@
 **MCP resource:** `https://mcp.reachmy.ai/mcp`  
 **Portal host:** `https://app.reachmy.ai`  
 **Report:** this file  
-**Gate:** Phase 3 closed. Phase 4 not started.
+**Gate:** Phase 3 closed. Phase **3.5** current. Phase 4 not started.
 
 ---
 
