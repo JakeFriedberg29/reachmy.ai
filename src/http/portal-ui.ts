@@ -803,6 +803,59 @@ export function renderPortalHome(opts: {
   });
 }
 
+/**
+ * Client-side Portal sign-in bridge: Clerk session → POST /v1/auth/clerk → an_session → redirect.
+ * Uses Clerk.addListener (clerk-js@5) to bridge immediately after sign-in completes.
+ */
+export function portalSignInClientScript(redirectTo: string): string {
+  return `
+          const redirectTo = ${JSON.stringify(redirectTo)};
+          let bridging = false;
+
+          async function bridgeReachMySession(Clerk) {
+            if (bridging || !Clerk.session) return false;
+            let token;
+            try {
+              token = await Clerk.session.getToken();
+            } catch (_) {
+              return false;
+            }
+            if (!token) return false;
+            bridging = true;
+            try {
+              const res = await fetch("/v1/auth/clerk", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ token }),
+                credentials: "same-origin",
+              });
+              if (!res.ok) {
+                bridging = false;
+                return false;
+              }
+              window.location.assign(redirectTo);
+              return true;
+            } catch (_) {
+              bridging = false;
+              return false;
+            }
+          }
+
+          async function initPortalSignIn(Clerk) {
+            await Clerk.load();
+            if (await bridgeReachMySession(Clerk)) return;
+            Clerk.addListener(async (emission) => {
+              if (emission.session) {
+                await bridgeReachMySession(Clerk);
+              }
+            }, { skipInitialEmit: true });
+            if (!Clerk.user) {
+              Clerk.mountSignIn(document.getElementById("clerk-app"));
+            }
+          }
+  `.trim();
+}
+
 export function renderPortalSignIn(config: AppConfig, redirectTo: string): string {
   const frontend = clerkFrontendApi(config.clerkPublishableKey);
   return portalLayout({
@@ -816,25 +869,13 @@ export function renderPortalSignIn(config: AppConfig, redirectTo: string): strin
         <div id="clerk-app"></div>
         <script>
           const publishableKey = ${JSON.stringify(config.clerkPublishableKey)};
-          const redirectTo = ${JSON.stringify(redirectTo)};
           const clerkJs = ${JSON.stringify(`https://${frontend}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`)};
+          ${portalSignInClientScript(redirectTo)}
           const script = document.createElement("script");
           script.src = clerkJs;
           script.setAttribute("data-clerk-publishable-key", publishableKey);
           script.onload = async () => {
-            const Clerk = window.Clerk;
-            await Clerk.load();
-            if (!Clerk.user) {
-              Clerk.mountSignIn(document.getElementById("clerk-app"));
-              return;
-            }
-            const token = await Clerk.session.getToken();
-            await fetch("/v1/auth/clerk", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ token }),
-            });
-            window.location.href = redirectTo;
+            await initPortalSignIn(window.Clerk);
           };
           document.head.appendChild(script);
         </script>
