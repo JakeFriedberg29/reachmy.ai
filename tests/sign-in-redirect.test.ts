@@ -1,70 +1,8 @@
 import assert from "node:assert/strict";
-import http from "node:http";
 import { test } from "node:test";
-import { encodeSessionCookie } from "../src/auth/session-cookie.js";
-import { hostnameFromUrl, loadConfig } from "../src/config.js";
-import { loadOrCreateJwks } from "../src/db/jwks.js";
-import { createHttpServer } from "../src/server.js";
+import { hostnameFromUrl } from "../src/config.js";
+import { httpRequest, sessionCookie, withServer } from "./helpers-http.js";
 import { makePrincipal, testDb } from "./helpers.js";
-
-type HttpResult = {
-  status: number;
-  body: string;
-  headers: http.IncomingHttpHeaders;
-};
-
-function httpRequest(
-  port: number,
-  host: string,
-  path: string,
-  init: { method?: string; headers?: Record<string, string> } = {},
-): Promise<HttpResult> {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      {
-        host: "127.0.0.1",
-        port,
-        path,
-        method: init.method ?? "GET",
-        headers: { host, ...init.headers },
-      },
-      (res) => {
-        let body = "";
-        res.on("data", (chunk) => {
-          body += chunk;
-        });
-        res.on("end", () => {
-          resolve({ status: res.statusCode ?? 0, body, headers: res.headers });
-        });
-      },
-    );
-    req.on("error", reject);
-    req.end();
-  });
-}
-
-async function withServer(run: (port: number, config: ReturnType<typeof loadConfig>) => Promise<void>) {
-  const config = loadConfig();
-  const db = await testDb();
-  const jwks = await loadOrCreateJwks(db);
-  const server = await createHttpServer(config, db, jwks);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("expected server address");
-  }
-  try {
-    await run(address.port, config);
-  } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
-  }
-}
-
-function sessionCookie(accountId: string, cookieKey: string): string {
-  return `an_session=${encodeSessionCookie(accountId, cookieKey)}`;
-}
 
 function assertOnOriginLocation(location: string | string[] | undefined, publicUrl: string): void {
   const value = Array.isArray(location) ? location[0] : location;

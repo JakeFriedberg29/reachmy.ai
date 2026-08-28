@@ -1,17 +1,12 @@
 import assert from "node:assert/strict";
-import http from "node:http";
 import { test } from "node:test";
 import { eq } from "drizzle-orm";
 import { mintScriptToken } from "../src/auth/script-token.js";
-import { encodeSessionCookie, SESSION_COOKIE } from "../src/auth/session-cookie.js";
-import { loadConfig } from "../src/config.js";
-import { accounts, agentConnections, oauthModels } from "../src/db/schema.js";
-import { loadOrCreateJwks } from "../src/db/jwks.js";
+import { accounts } from "../src/db/schema.js";
 import {
   createIdentity,
   ensureProvisionalPrincipal,
   upsertAccountByClerkUser,
-  upsertGrantConnection,
 } from "../src/domain/identity.js";
 import { isPortalHostAllowedPath } from "../src/http/host.js";
 import {
@@ -23,118 +18,9 @@ import {
   portalStatusBadge,
   portalStyles,
 } from "../src/http/portal-ui.js";
-import { createHttpServer } from "../src/server.js";
+import { httpRequest, seedAiConnection, sessionCookie, withServer } from "./helpers-http.js";
 import { obtainOAuthAccessToken } from "./helpers-oauth-token.js";
 import { makeGrantPrincipal, suffix, testDb } from "./helpers.js";
-
-type HttpResult = {
-  status: number;
-  body: string;
-  headers: http.IncomingHttpHeaders;
-};
-
-function sessionCookie(accountId: string, cookieKey: string): string {
-  return `${SESSION_COOKIE}=${encodeSessionCookie(accountId, cookieKey)}`;
-}
-
-function httpRequest(
-  port: number,
-  host: string,
-  path: string,
-  options: {
-    method?: string;
-    cookie?: string;
-    authorization?: string;
-    body?: string;
-    contentType?: string;
-  } = {},
-): Promise<HttpResult> {
-  return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = { host };
-    if (options.cookie) headers.cookie = options.cookie;
-    if (options.authorization) headers.authorization = options.authorization;
-    if (options.contentType) headers["content-type"] = options.contentType;
-    if (options.body) headers["content-length"] = String(Buffer.byteLength(options.body));
-    const req = http.request(
-      {
-        host: "127.0.0.1",
-        port,
-        path,
-        method: options.method ?? "GET",
-        headers,
-      },
-      (res) => {
-        let body = "";
-        res.on("data", (chunk) => {
-          body += chunk;
-        });
-        res.on("end", () => {
-          resolve({ status: res.statusCode ?? 0, body, headers: res.headers });
-        });
-      },
-    );
-    req.on("error", reject);
-    if (options.body) req.write(options.body);
-    req.end();
-  });
-}
-
-async function withServer(run: (port: number, config: ReturnType<typeof loadConfig>) => Promise<void>) {
-  const config = loadConfig();
-  const db = await testDb();
-  const jwks = await loadOrCreateJwks(db);
-  const server = await createHttpServer(config, db, jwks);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("expected server address");
-  }
-  try {
-    await run(address.port, config);
-  } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
-  }
-}
-
-async function seedOauthClient(
-  db: Awaited<ReturnType<typeof testDb>>,
-  clientId: string,
-  payload: { client_name?: string; redirect_uris?: string[] },
-) {
-  await db.insert(oauthModels).values({
-    model: "Client",
-    id: clientId,
-    payload,
-  });
-}
-
-async function seedAiConnection(
-  db: Awaited<ReturnType<typeof testDb>>,
-  principalId: string,
-  input: {
-    clientPayload: { client_name?: string; redirect_uris?: string[] };
-    grantId: string;
-    status?: string;
-  },
-) {
-  const clientId = input.grantId;
-  await seedOauthClient(db, clientId, input.clientPayload);
-  const connectionId = await upsertGrantConnection(db, {
-    principalId,
-    grantId: input.grantId,
-    oauthClientId: clientId,
-    displayLabel: "MCP",
-  });
-  if (input.status && input.status !== "connected") {
-    await db
-      .update(agentConnections)
-      .set({ status: input.status })
-      .where(eq(agentConnections.id, connectionId));
-  }
-  return connectionId;
-}
 
 function assertNoSensitiveLeak(html: string) {
   assert.doesNotMatch(html, /grant_id|oauth_client_id|agent_connection_id|principal_id|clerk_user_id/i);

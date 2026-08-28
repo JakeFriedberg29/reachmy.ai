@@ -1,83 +1,17 @@
 import assert from "node:assert/strict";
-import http from "node:http";
 import { test } from "node:test";
 import { eq } from "drizzle-orm";
-import { encodeSessionCookie, SESSION_COOKIE } from "../src/auth/session-cookie.js";
-import { loadConfig } from "../src/config.js";
 import { accounts } from "../src/db/schema.js";
-import { loadOrCreateJwks } from "../src/db/jwks.js";
 import { DomainError } from "../src/domain/errors.js";
 import { upsertAccountByClerkUser } from "../src/domain/identity.js";
 import {
   getAccountPlatformRole,
   requirePlatformAdmin,
 } from "../src/domain/platform-admin.js";
-import { createHttpServer } from "../src/server.js";
+import { httpRequest, sessionCookie, withServer } from "./helpers-http.js";
 import { obtainOAuthAccessToken } from "./helpers-oauth-token.js";
 import { makeGrantPrincipal, suffix, testDb } from "./helpers.js";
 import { mintScriptToken } from "../src/auth/script-token.js";
-
-type HttpResult = {
-  status: number;
-  body: string;
-  headers: http.IncomingHttpHeaders;
-};
-
-function httpRequest(
-  port: number,
-  host: string,
-  path: string,
-  options: { method?: string; cookie?: string; authorization?: string } = {},
-): Promise<HttpResult> {
-  return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = { host };
-    if (options.cookie) headers.cookie = options.cookie;
-    if (options.authorization) headers.authorization = options.authorization;
-    const req = http.request(
-      {
-        host: "127.0.0.1",
-        port,
-        path,
-        method: options.method ?? "GET",
-        headers,
-      },
-      (res) => {
-        let body = "";
-        res.on("data", (chunk) => {
-          body += chunk;
-        });
-        res.on("end", () => {
-          resolve({ status: res.statusCode ?? 0, body, headers: res.headers });
-        });
-      },
-    );
-    req.on("error", reject);
-    req.end();
-  });
-}
-
-async function withServer(run: (port: number, config: ReturnType<typeof loadConfig>) => Promise<void>) {
-  const config = loadConfig();
-  const db = await testDb();
-  const jwks = await loadOrCreateJwks(db);
-  const server = await createHttpServer(config, db, jwks);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("expected server address");
-  }
-  try {
-    await run(address.port, config);
-  } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
-  }
-}
-
-function sessionCookie(accountId: string, cookieKey: string): string {
-  return `${SESSION_COOKIE}=${encodeSessionCookie(accountId, cookieKey)}`;
-}
 
 test("new accounts default to platform_role=user", async () => {
   const db = await testDb();

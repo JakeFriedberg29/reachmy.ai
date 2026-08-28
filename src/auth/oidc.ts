@@ -33,9 +33,55 @@ function cookieFlags(req: IncomingMessage) {
 }
 
 type Grant = InstanceType<Provider["Grant"]>;
-type Interaction = Awaited<ReturnType<Provider["interactionDetails"]>>;
+export type OidcInteraction = Awaited<ReturnType<Provider["interactionDetails"]>>;
 
-function applyRequestedGrant(grant: Grant, details: Interaction, defaultResource: string): void {
+/**
+ * What the user is shown before authorizing a client. Every field is descriptive: locked
+ * principle 13 forbids client metadata from influencing any authorization decision.
+ */
+export type ConsentSummary = {
+  clientId: string;
+  clientName: string | null;
+  redirectUri: string | null;
+  redirectHost: string | null;
+  scopes: string[];
+  resources: string[];
+};
+
+function requestedResources(details: OidcInteraction): string[] {
+  const resourceParam = details.params.resource;
+  if (Array.isArray(resourceParam)) return resourceParam.map(String);
+  return resourceParam ? [String(resourceParam)] : [];
+}
+
+export async function summarizeConsent(
+  provider: Provider,
+  details: OidcInteraction,
+): Promise<ConsentSummary> {
+  const clientId = String(details.params.client_id ?? "");
+  const client = clientId ? await provider.Client.find(clientId) : undefined;
+  const redirectUri =
+    typeof details.params.redirect_uri === "string" ? details.params.redirect_uri : null;
+  let redirectHost: string | null = null;
+  if (redirectUri) {
+    try {
+      redirectHost = new URL(redirectUri).host;
+    } catch {
+      redirectHost = null;
+    }
+  }
+  const scopeParam = typeof details.params.scope === "string" ? details.params.scope : "";
+  return {
+    clientId,
+    clientName: typeof client?.clientName === "string" ? client.clientName : null,
+    redirectUri,
+    redirectHost,
+    scopes: scopeParam.split(" ").filter(Boolean),
+    resources: requestedResources(details),
+  };
+}
+
+function applyRequestedGrant(grant: Grant, details: OidcInteraction, defaultResource: string): void {
   const promptDetails = details.prompt.details as {
     missingOIDCScope?: string[];
     missingOIDCClaims?: string[];
@@ -59,12 +105,7 @@ function applyRequestedGrant(grant: Grant, details: Interaction, defaultResource
   const paramScope = typeof details.params.scope === "string" ? details.params.scope.trim() : "";
   grant.addOIDCScope(paramScope || SCOPES);
 
-  const resourceParam = details.params.resource;
-  const resources = Array.isArray(resourceParam)
-    ? resourceParam.map(String)
-    : resourceParam
-      ? [String(resourceParam)]
-      : [];
+  const resources = requestedResources(details);
   if (!resources.includes(defaultResource)) resources.push(defaultResource);
   for (const indicator of resources) {
     grant.addResourceScope(indicator, SCOPES);
@@ -310,7 +351,9 @@ export async function completeOauthInteraction(
   } = {
     consent: { grantId: savedGrantId },
   };
-  if (prompt.name === "login" || !session?.accountId) {
+  // Re-assert the login when the provider session is absent or bound to a different subject, so
+  // the grant can never be issued against an account other than the one that just consented.
+  if (prompt.name === "login" || session?.accountId !== accountId) {
     result.login = { accountId };
   }
 
@@ -334,4 +377,34 @@ export async function completeOauthInteraction(
   await provider.interactionFinished(req, res, result, {
     mergeWithLastSubmission: true,
   });
+}
+
+export async function denyOauthInteraction(
+  provider: Provider,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const details = await provider.interactionDetails(req, res);
+  const redirectUri =
+    typeof details.params.redirect_uri === "string" ? details.params.redirect_uri : null;
+
+  logOauth("consent_denied", {
+    uid: details.uid,
+    prompt: details.prompt.name,
+    client_id: details.params.client_id ?? null,
+    redirect_uri: redirectUri,
+    resume_url: details.returnTo,
+  });
+
+  attachRedirectLogger(res, { uid: details.uid, prompt: details.prompt.name, redirect_uri: redirectUri });
+
+  await provider.interactionFinished(
+    req,
+    res,
+    {
+      error: "access_denied",
+      error_description: "The user denied this authorization request.",
+    },
+    { mergeWithLastSubmission: false },
+  );
 }

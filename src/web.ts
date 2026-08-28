@@ -2,7 +2,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type Provider from "oidc-provider";
 import { resolveBrowserAccountId } from "./auth/browser-account.js";
 import { clerkFrontendApi } from "./auth/clerk.js";
-import { completeOauthInteraction, logOauth } from "./auth/oidc.js";
+import {
+  type ConsentSummary,
+  completeOauthInteraction,
+  denyOauthInteraction,
+  logOauth,
+  summarizeConsent,
+} from "./auth/oidc.js";
 import {
   appendSessionCookieHeader,
   decodeSessionCookie,
@@ -164,6 +170,51 @@ export async function handleInvitePost(
   }
 }
 
+function renderAuthorize(input: {
+  uid: string;
+  promptName: string;
+  accountId: string;
+  label: string;
+  summary: ConsentSummary;
+}): string {
+  const { uid, promptName, accountId, label, summary } = input;
+  const clientLabel = summary.clientName ?? summary.clientId ?? "An unnamed client";
+  const scopeItems = summary.scopes.length
+    ? summary.scopes.map((scope) => `<li><code>${escapeHtml(scope)}</code></li>`).join("")
+    : "<li>No access requested</li>";
+  return htmlPage(
+    "Authorize an agent",
+    `
+      <h1>Authorize an agent</h1>
+      <p><strong>${escapeHtml(clientLabel)}</strong> is asking to act as your Agent Name on Agent Network.</p>
+      <p>Continue as <code>${escapeHtml(label)}</code>. This grant maps to your Agent Network account subject <code>${escapeHtml(accountId)}</code>. Email is never used as the OAuth subject.</p>
+      <h2>This would allow it to</h2>
+      <ul>${scopeItems}</ul>
+      <p class="muted">Authorization codes are returned to <code>${escapeHtml(summary.redirectHost ?? "an unrecognized host")}</code>. Only allow this if you just asked this AI to connect to Agent Network.</p>
+      <form method="post" action="/interaction/${encodeURIComponent(uid)}/confirm">
+        <button type="submit">Allow</button>
+      </form>
+      <form method="post" action="/interaction/${encodeURIComponent(uid)}/deny">
+        <button type="submit">Deny</button>
+      </form>
+      <pre>${escapeHtml(
+        JSON.stringify(
+          {
+            prompt: promptName,
+            client_id: summary.clientId,
+            client_name: summary.clientName,
+            redirect_uri: summary.redirectUri,
+            scope: summary.scopes.join(" "),
+            resource: summary.resources,
+          },
+          null,
+          2,
+        ),
+      )}</pre>
+    `,
+  );
+}
+
 export async function handleInteraction(
   provider: Provider,
   config: AppConfig,
@@ -172,12 +223,21 @@ export async function handleInteraction(
   res: ServerResponse,
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", config.publicUrl);
-  const match = url.pathname.match(/^\/interaction\/([^/]+)(\/login)?$/);
+  const match = url.pathname.match(/^\/interaction\/([^/]+)(?:\/(confirm|deny))?$/);
   if (!match) return false;
+  const uid = match[1]!;
+  const action = match[2];
+
+  // Refusing an authorization needs no identity, so this runs before session resolution.
+  if (req.method === "POST" && action === "deny") {
+    logOauth("interaction_post_deny", { uid, path: req.url });
+    await denyOauthInteraction(provider, req, res);
+    return true;
+  }
 
   const accountId = await resolveInteractionAccountId(req, res, config, db);
 
-  if (req.method === "GET" && !match[2]) {
+  if (req.method === "GET" && !action) {
     if (!accountId) {
       res.statusCode = 302;
       res.setHeader("location", `/sign-in?redirect=${encodeURIComponent(url.pathname)}`);
@@ -193,39 +253,18 @@ export async function handleInteraction(
       client_id: details.params.client_id ?? null,
     });
 
-    if (details.prompt.name !== "login") {
-      await completeOauthInteraction(provider, config, db, req, res, accountId);
-      return true;
-    }
-
+    // Every prompt oidc-provider raises is shown to the user. `login` is authentication and
+    // `consent` is authorization; auto-completing either would let a live session stand in for
+    // a human decision. No prompt at all means an existing grant already covers the request,
+    // and that case never reaches this handler.
     const identity = await getIdentityByAccountId(db, accountId);
-    const redirectUri = String(details.params.redirect_uri ?? "");
-    const label = identity.handle ? `@${identity.handle}` : identity.account_id;
-    const body = htmlPage(
-      "Authorize agent",
-      `
-      <h1>Authorize an agent</h1>
-      <p>This grant maps to your Agent Network account subject <code>${escapeHtml(identity.account_id)}</code>. Email is never used as the OAuth subject.</p>
-      <p>Continue as <code>${escapeHtml(label)}</code>.</p>
-      <form method="post" action="/interaction/${details.uid}/login">
-        <button type="submit">Allow</button>
-      </form>
-      <pre>${escapeHtml(
-        JSON.stringify(
-          {
-            prompt: details.prompt.name,
-            client_id: details.params.client_id,
-            redirect_uri: redirectUri,
-            scope: details.params.scope,
-            resource: details.params.resource,
-            code_challenge_method: details.params.code_challenge_method,
-          },
-          null,
-          2,
-        ),
-      )}</pre>
-    `,
-    );
+    const body = renderAuthorize({
+      uid: details.uid,
+      promptName: details.prompt.name,
+      accountId: identity.account_id,
+      label: identity.handle ? `@${identity.handle}` : identity.account_id,
+      summary: await summarizeConsent(provider, details),
+    });
     res.statusCode = 200;
     res.setHeader("content-type", "text/html; charset=utf-8");
     res.setHeader("cache-control", "no-store");
@@ -233,14 +272,14 @@ export async function handleInteraction(
     return true;
   }
 
-  if (req.method === "POST" && match[2] === "/login") {
+  if (req.method === "POST" && action === "confirm") {
     if (!accountId) {
       res.statusCode = 302;
-      res.setHeader("location", `/sign-in?redirect=${encodeURIComponent(`/interaction/${match[1]}`)}`);
+      res.setHeader("location", `/sign-in?redirect=${encodeURIComponent(`/interaction/${uid}`)}`);
       res.end();
       return true;
     }
-    logOauth("interaction_post_login", { uid: match[1], path: req.url });
+    logOauth("interaction_post_confirm", { uid, path: req.url });
     await completeOauthInteraction(provider, config, db, req, res, accountId);
     return true;
   }

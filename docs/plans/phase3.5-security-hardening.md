@@ -1,6 +1,8 @@
 # Phase 3.5 — Security Hardening & Repository Hygiene
 
-**Status:** Plan **approved** 2026-08-27. **Slices 1–2 complete.** Slices 3–8 not started.
+**Status:** Plan **approved** 2026-08-27. **Slices 1–4 complete.** Slices 5–8 not started.
+Slice 4 is implemented and covered by automated tests; its **required real-provider regression is
+still outstanding** (see §7 Slice 4).
 **Gate:** Phase 3 is **complete** and stays complete. Phase 4 has **not** started.
 **Type:** Small stabilization phase. Not a feature phase. Not a refactor phase.
 
@@ -235,8 +237,8 @@ hygiene, per operator instruction.
 |---|---|---|---|
 | 1 | Safe redirect helper | Low | — | **Complete** |
 | 2 | Fail-closed production `COOKIE_KEYS` | Low–Medium | — | **Complete** |
-| 3 | Shared HTTP test harness | Low | — |
-| 4 | Explicit OAuth consent | **Medium–High** | 3 |
+| 3 | Shared HTTP test harness | Low | — | **Complete** |
+| 4 | Explicit OAuth consent | **Medium–High** | 3 | **Complete (pending provider regression)** |
 | 5 | DCR policy + metadata validation | Medium | 4 |
 | 6a | Scope observability (report-only) | Low | 3 |
 | 6b | Scope issuance + enforcement | **High** | 6a, 4 |
@@ -338,6 +340,27 @@ first, then ship.
 
 **Manual validation.** None.
 
+**Outcome (complete).** `tests/helpers-http.ts` exports `withServer`, `httpRequest`, `sessionCookie`,
+`seedOauthClient`, `seedAiConnection`, plus the shared `HttpResult` / `HttpRequestOptions` types. Ten
+test files now import them — the nine listed above plus `tests/sign-in-redirect.test.ts`, which Slice 1
+added after this plan was written. Baseline and post-change suites both report **140 pass / 0 fail**.
+No application code changed.
+
+Two deliberate consolidations, both behavior-preserving:
+
+- `withServer` always calls `setClerkBrowserSessionResolverForTests(null)` on teardown. Previously only
+  the `phase3-slice3` copy did. `null` is the default state, so this is a no-op for the other files and
+  removes a cross-test leak.
+- `httpRequest` takes a single options object. `phase3-slice0` previously passed the method
+  positionally; its two call sites now pass `{ method: "POST" }`. A `headers` escape hatch covers
+  `sign-in-redirect`, which passed raw headers.
+
+**Finding for Slice 7.** `tests/` is excluded from `tsconfig.json`, and an ad-hoc `tsc` run over the
+suite surfaces one **pre-existing** error, unrelated to this slice: in `phase3-slice3.test.ts` the
+inline cookie-jar helper tests `typeof setCookie === "string"`, but `IncomingHttpHeaders["set-cookie"]`
+is `string[] | undefined`, so the branch narrows to `never`. Verified present at commit `4b2ea15`.
+Slice 7 must fix it when it turns on test typechecking.
+
 ---
 
 ### Slice 4 — Explicit OAuth consent
@@ -368,6 +391,42 @@ second authorization with an existing grant does not re-prompt; the six existing
 
 **Manual validation.** **Required.** Real Claude reconnect and real ChatGPT reconnect against a
 deployed build. This is the highest UX-breakage risk in the phase.
+
+**Outcome (code complete; provider regression outstanding).**
+
+Root cause was the inverted condition at the old `src/web.ts:194`: `login` (authentication) rendered
+a screen while `consent` (authorization) was auto-completed. Every prompt is now shown. The handler
+no longer branches on prompt name at all, so no future prompt type can silently auto-approve.
+
+New behavior by scenario:
+
+| Scenario | Prompt | Before | After |
+|---|---|---|---|
+| First connector, fresh browser | `login` | Allow screen | Allow screen, now naming client + redirect host + scopes |
+| Second connector, live session | `consent` | **Silently approved** | **Consent screen** |
+| Reconnect of an already-granted client | none | No screen | No screen (unchanged) |
+| Expired grant / widened scope, live session | `consent` | **Silently approved** | **Consent screen** |
+| Refresh token | none | No interaction | No interaction (unchanged) |
+
+Routes: `POST /interaction/:uid/login` became `POST /interaction/:uid/confirm`, and
+`POST /interaction/:uid/deny` was added. Deny finishes the interaction with `access_denied` and is
+handled before session resolution, since refusing needs no identity. The Allow form is emitted first
+so the `action="…"` matchers in `helpers-oauth-token.ts`, `scripts/oauth-smoke.mjs`, and
+`scripts/phase1-smoke.ts` keep selecting approval.
+
+`summarizeConsent()` in `src/auth/oidc.ts` supplies `client_name`, redirect host, and requested
+scopes for display. Descriptive only — no authorization decision reads it (locked principle 13).
+
+One adjacent correctness fix: `completeOauthInteraction` re-asserts the login whenever the provider
+session subject differs from the consenting account, not only when the session is absent. Previously
+a stale provider session for another subject could receive the grant.
+
+Verified non-vacuous: with the old auto-complete branch temporarily restored, the "existing session
+does not silently authorize a different client" test fails; with the fix it passes.
+
+**UX note for the deferred provider regression.** First-time connect is still a single screen,
+because the `login` prompt submission carries both login and consent. The only added screen is the
+second-connector case, exactly as §3 predicted.
 
 ---
 
@@ -575,7 +634,14 @@ not a security issue. Do not spend slice time on it.
 | 78 | **Slice 2 pre-ship gate:** verify Railway Production `COOKIE_KEYS` meets validation before deploying fail-closed config. |
 | 79 | **Scope slices gate:** do not narrow OAuth scope issuance (Slice 6b) until Slice 6a logs document real Claude and ChatGPT authorization requests. |
 | 80 | Slice 2 complete: `assertSafeCookieKeys` fails closed in production; local dev keeps named fallback with one-time warning. |
+| 81 | Slice 3 complete: `tests/helpers-http.ts` is the single HTTP test harness. New HTTP-level tests in slices 4–6 import it rather than defining local copies. |
+| 82 | Slice numbering is **as written in §7**. Explicit OAuth consent is **Slice 4**, not Slice 3. Ordering re-confirmed by the operator 2026-08-27 when the question was raised again. |
+| 83 | Slice 4 code complete: no interaction prompt is ever auto-completed. The consent handler does not branch on prompt name, so a new prompt type cannot silently approve. |
+| 84 | Consent is a two-outcome decision. Deny is a first-class route returning `access_denied`; it is not a dead-end page. |
+| 85 | A grant is only ever issued to the account that consented. `completeOauthInteraction` re-asserts login on any provider-session subject mismatch. |
+| 86 | **Slice 5 gate:** Slice 4's real Claude and ChatGPT reconnect regression must be run against a deployed build before Slice 5 ships, since Slice 5 also touches the connect path. |
 
 ---
 
-*End of Phase 3.5 plan. Slices 1–2 complete. Awaiting Slice 3 approval before implementation.*
+*End of Phase 3.5 plan. Slices 1–4 complete (Slice 4 pending real-provider regression). Slice 5 (DCR
+policy + client metadata validation) is next and has not started.*

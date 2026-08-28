@@ -8,25 +8,18 @@ import {
   setClerkBrowserSessionResolverForTests,
 } from "../src/auth/browser-account.js";
 import { clerkAuthorizedParties, verifyClerkJwt } from "../src/auth/clerk.js";
-import { encodeSessionCookie, SESSION_COOKIE } from "../src/auth/session-cookie.js";
+import { SESSION_COOKIE } from "../src/auth/session-cookie.js";
 import { loadConfig } from "../src/config.js";
 import { principals } from "../src/db/schema.js";
-import { loadOrCreateJwks } from "../src/db/jwks.js";
 import {
   ensureProvisionalPrincipal,
   getIdentityByAccountId,
   upsertAccountByClerkUser,
 } from "../src/domain/identity.js";
 import { mintScriptToken } from "../src/auth/script-token.js";
-import { createHttpServer } from "../src/server.js";
+import { type HttpResult, httpRequest, sessionCookie, withServer } from "./helpers-http.js";
 import { obtainOAuthAccessToken } from "./helpers-oauth-token.js";
 import { makeGrantPrincipal, suffix, testDb } from "./helpers.js";
-
-type HttpResult = {
-  status: number;
-  body: string;
-  headers: http.IncomingHttpHeaders;
-};
 
 function mockRequest(
   init: { cookie?: string; authorization?: string; url?: string; method?: string } = {},
@@ -35,57 +28,6 @@ function mockRequest(
   if (init.cookie) headers.cookie = init.cookie;
   if (init.authorization) headers.authorization = init.authorization;
   return { headers, method: init.method ?? "GET", url: init.url ?? "/interaction/test" } as http.IncomingMessage;
-}
-
-function sessionCookie(accountId: string, cookieKey: string): string {
-  return `${SESSION_COOKIE}=${encodeSessionCookie(accountId, cookieKey)}`;
-}
-
-async function withServer(run: (port: number, config: ReturnType<typeof loadConfig>) => Promise<void>) {
-  const config = loadConfig();
-  const db = await testDb();
-  const jwks = await loadOrCreateJwks(db);
-  const server = await createHttpServer(config, db, jwks);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("expected server address");
-  }
-  try {
-    await run(address.port, config);
-  } finally {
-    setClerkBrowserSessionResolverForTests(null);
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
-  }
-}
-
-function httpRequest(
-  port: number,
-  host: string,
-  path: string,
-  options: { method?: string; cookie?: string; authorization?: string } = {},
-): Promise<HttpResult> {
-  return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = { host };
-    if (options.cookie) headers.cookie = options.cookie;
-    if (options.authorization) headers.authorization = options.authorization;
-    const req = http.request(
-      { host: "127.0.0.1", port, path, method: options.method ?? "GET", headers },
-      (res) => {
-        let body = "";
-        res.on("data", (chunk) => {
-          body += chunk;
-        });
-        res.on("end", () => {
-          resolve({ status: res.statusCode ?? 0, body, headers: res.headers });
-        });
-      },
-    );
-    req.on("error", reject);
-    req.end();
-  });
 }
 
 test("Slice 3A: existing an_session resolves without Clerk bridge", async () => {

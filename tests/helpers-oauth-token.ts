@@ -1,12 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
 import http from "node:http";
-import type { AppConfig } from "../src/config.js";
 import { encodeSessionCookie } from "../src/auth/session-cookie.js";
-import { hostnameFromUrl } from "../src/config.js";
+import { hostnameFromUrl, type AppConfig } from "../src/config.js";
 
-const REDIRECT_URI = "https://claude.ai/api/mcp/auth_callback";
-const SCOPE =
+export const DEFAULT_REDIRECT_URI = "https://claude.ai/api/mcp/auth_callback";
+export const DEFAULT_SCOPE =
   "identity:read contacts:read contacts:write interactions:read interactions:write proposals:write approvals:write offline_access";
+
+const MAX_HOPS = 12;
 
 type Cookie = { name: string; value: string; path: string };
 
@@ -23,14 +24,14 @@ function createJar(initial?: Cookie) {
     store(setCookie: string[] | undefined, requestPath: string) {
       for (const raw of setCookie ?? []) {
         const [pair, ...attrs] = raw.split(";");
-        const eq = pair.indexOf("=");
-        const name = pair.slice(0, eq).trim();
-        const value = pair.slice(eq + 1).trim();
+        const eq = pair!.indexOf("=");
+        const name = pair!.slice(0, eq).trim();
+        const value = pair!.slice(eq + 1).trim();
         let path = requestPath.slice(0, requestPath.lastIndexOf("/")) || "/";
         let expired = false;
         for (const attr of attrs) {
           const [k, v = ""] = attr.split("=");
-          const key = k.trim().toLowerCase();
+          const key = k!.trim().toLowerCase();
           if (key === "path") path = v.trim();
           if (key === "max-age" && Number(v) <= 0) expired = true;
           if (key === "expires" && new Date(v).getTime() <= Date.now()) expired = true;
@@ -54,15 +55,13 @@ function pkce() {
   return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
 }
 
+type FetchInit = { method?: string; headers?: Record<string, string>; body?: string };
+
 function httpFetch(
   port: number,
   mcpHost: string,
   path: string,
-  init: {
-    method?: string;
-    headers?: Record<string, string>;
-    body?: string;
-  } = {},
+  init: FetchInit = {},
 ): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
   return new Promise((resolve, reject) => {
     const req = http.request(
@@ -94,20 +93,50 @@ function mcpPath(endpoint: string, mcpHost: string): string {
   return `${url.pathname}${url.search}`;
 }
 
-/** Obtain a real ReachMy MCP/OAuth access token via DCR + PKCE (for security tests). */
-export async function obtainOAuthAccessToken(
-  port: number,
-  config: AppConfig,
-  accountId: string,
-): Promise<string> {
-  const mcpHost = hostnameFromUrl(config.publicUrl);
-  const jar = createJar({
-    name: "an_session",
-    value: encodeSessionCookie(accountId, config.cookieKeys[0]!),
-    path: "/",
-  });
+/** Where an authorization walk came to rest. */
+export type OauthStop =
+  | { kind: "interaction"; url: string; status: number; body: string; formActions: string[] }
+  | {
+      kind: "callback";
+      location: string;
+      code: string | null;
+      error: string | null;
+      errorDescription: string | null;
+    }
+  | { kind: "signin"; location: string }
+  | { kind: "unexpected"; url: string; status: number; body: string };
 
-  const visit = async (path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => {
+export type AuthorizeInput = {
+  clientId: string;
+  scope?: string;
+  redirectUri?: string;
+  resource?: string;
+};
+
+/**
+ * Drives a browser-shaped OAuth flow against the MCP host: DCR, authorization, consent-form
+ * submission, and token exchange, with one cookie jar for the whole session. Unlike
+ * `obtainOAuthAccessToken` it stops at each interaction page instead of auto-approving, so
+ * consent behavior itself can be asserted.
+ */
+export function createOauthSession(port: number, config: AppConfig, accountId: string | null) {
+  const mcpHost = hostnameFromUrl(config.publicUrl);
+  const jar = createJar(
+    accountId
+      ? { name: "an_session", value: encodeSessionCookie(accountId, config.cookieKeys[0]!), path: "/" }
+      : undefined,
+  );
+
+  let metadata: {
+    resource: string;
+    authorizationEndpoint: string;
+    tokenEndpoint: string;
+    registrationEndpoint: string;
+  } | null = null;
+  let verifier: string | null = null;
+  let redirectUri = DEFAULT_REDIRECT_URI;
+
+  const visit = async (path: string, init: FetchInit = {}) => {
     const headers = { ...init.headers };
     const cookie = jar.header(path);
     if (cookie) headers.cookie = cookie;
@@ -116,80 +145,155 @@ export async function obtainOAuthAccessToken(
     return res;
   };
 
-  const prm = JSON.parse((await visit("/.well-known/oauth-protected-resource")).body) as { resource: string };
-  const asm = JSON.parse((await visit("/.well-known/oauth-authorization-server")).body) as {
-    authorization_endpoint: string;
-    token_endpoint: string;
-    registration_endpoint: string;
+  const discover = async () => {
+    if (metadata) return metadata;
+    const prm = JSON.parse((await visit("/.well-known/oauth-protected-resource")).body) as {
+      resource: string;
+    };
+    const asm = JSON.parse((await visit("/.well-known/oauth-authorization-server")).body) as {
+      authorization_endpoint: string;
+      token_endpoint: string;
+      registration_endpoint: string;
+    };
+    metadata = {
+      resource: prm.resource,
+      authorizationEndpoint: asm.authorization_endpoint,
+      tokenEndpoint: asm.token_endpoint,
+      registrationEndpoint: asm.registration_endpoint,
+    };
+    return metadata;
   };
 
-  const regRes = await visit(mcpPath(asm.registration_endpoint, mcpHost), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      client_name: "Test-Claude",
-      redirect_uris: [REDIRECT_URI],
-      grant_types: ["authorization_code", "refresh_token"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-      scope: SCOPE,
-    }),
-  });
-  const client = JSON.parse(regRes.body) as { client_id?: string };
-  if (!client.client_id) throw new Error("DCR failed in OAuth test helper");
+  const walk = async (startUrl: string, startMethod: "GET" | "POST"): Promise<OauthStop> => {
+    let url = startUrl;
+    let method: "GET" | "POST" = startMethod;
+    for (let hop = 0; hop < MAX_HOPS; hop++) {
+      const res = await visit(url, { method });
+      method = "GET";
+      const location = typeof res.headers.location === "string" ? res.headers.location : null;
+      if (location?.startsWith(redirectUri)) {
+        const cb = new URL(location);
+        return {
+          kind: "callback",
+          location,
+          code: cb.searchParams.get("code"),
+          error: cb.searchParams.get("error"),
+          errorDescription: cb.searchParams.get("error_description"),
+        };
+      }
+      if (location) {
+        const next = new URL(location, `http://${mcpHost}`);
+        if (next.pathname === "/sign-in") return { kind: "signin", location };
+        url = `${next.pathname}${next.search}`;
+        continue;
+      }
+      if (res.status === 200 && url.startsWith("/interaction/")) {
+        return {
+          kind: "interaction",
+          url,
+          status: res.status,
+          body: res.body,
+          formActions: [...res.body.matchAll(/action="([^"]+)"/g)].map((m) => m[1]!),
+        };
+      }
+      return { kind: "unexpected", url, status: res.status, body: res.body };
+    }
+    return { kind: "unexpected", url, status: 0, body: `exceeded ${MAX_HOPS} hops` };
+  };
 
-  const { verifier, challenge } = pkce();
-  const authBase = new URL(asm.authorization_endpoint, `http://${mcpHost}`);
-  authBase.search = new URLSearchParams({
-    response_type: "code",
-    client_id: client.client_id,
-    redirect_uri: REDIRECT_URI,
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-    state: randomBytes(8).toString("hex"),
-    resource: prm.resource,
-    scope: SCOPE,
-  }).toString();
-  let url = `${authBase.pathname}${authBase.search}`;
-  let method: "GET" | "POST" = "GET";
-  let code: string | null = null;
-  for (let hop = 0; hop < 12; hop++) {
-    const res = await visit(url, { method });
-    const location = typeof res.headers.location === "string" ? res.headers.location : null;
-    method = "GET";
-    if (location?.startsWith(REDIRECT_URI)) {
-      code = new URL(location).searchParams.get("code");
-      break;
-    }
-    if (location) {
-      const next = new URL(location, `http://${mcpHost}`);
-      url = `${next.pathname}${next.search}`;
-      continue;
-    }
-    if (res.status === 200 && url.startsWith("/interaction/")) {
-      const action = res.body.match(/action="([^"]+)"/)?.[1];
-      if (!action) throw new Error("OAuth consent form missing");
-      url = action;
-      method = "POST";
-      continue;
-    }
-    throw new Error(`OAuth helper stopped at ${res.status} ${url}`);
+  return {
+    discover,
+
+    async register(overrides: Record<string, unknown> = {}): Promise<string> {
+      const meta = await discover();
+      const res = await visit(mcpPath(meta.registrationEndpoint, mcpHost), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          client_name: "Test-Claude",
+          redirect_uris: [DEFAULT_REDIRECT_URI],
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+          scope: DEFAULT_SCOPE,
+          ...overrides,
+        }),
+      });
+      const client = JSON.parse(res.body) as { client_id?: string };
+      if (!client.client_id) throw new Error(`DCR failed: ${res.status} ${res.body.slice(0, 200)}`);
+      return client.client_id;
+    },
+
+    async authorize(input: AuthorizeInput): Promise<OauthStop> {
+      const meta = await discover();
+      redirectUri = input.redirectUri ?? DEFAULT_REDIRECT_URI;
+      const generated = pkce();
+      verifier = generated.verifier;
+      const authUrl = new URL(meta.authorizationEndpoint, `http://${mcpHost}`);
+      authUrl.search = new URLSearchParams({
+        response_type: "code",
+        client_id: input.clientId,
+        redirect_uri: redirectUri,
+        code_challenge: generated.challenge,
+        code_challenge_method: "S256",
+        state: randomBytes(8).toString("hex"),
+        resource: input.resource ?? meta.resource,
+        scope: input.scope ?? DEFAULT_SCOPE,
+      }).toString();
+      return walk(`${authUrl.pathname}${authUrl.search}`, "GET");
+    },
+
+    submit(action: string): Promise<OauthStop> {
+      const next = new URL(action, `http://${mcpHost}`);
+      return walk(`${next.pathname}${next.search}`, "POST");
+    },
+
+    async exchange(input: {
+      clientId: string;
+      code: string;
+      resource?: string;
+    }): Promise<Record<string, unknown>> {
+      const meta = await discover();
+      if (!verifier) throw new Error("exchange() called before authorize()");
+      const res = await visit(mcpPath(meta.tokenEndpoint, mcpHost), {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: input.code,
+          redirect_uri: redirectUri,
+          client_id: input.clientId,
+          code_verifier: verifier,
+          resource: input.resource ?? meta.resource,
+        }).toString(),
+      });
+      return JSON.parse(res.body) as Record<string, unknown>;
+    },
+  };
+}
+
+/**
+ * Approve every interaction and return a usable MCP access token. Used by security tests that
+ * need a real token but do not care about the consent screen itself.
+ */
+export async function obtainOAuthAccessToken(
+  port: number,
+  config: AppConfig,
+  accountId: string,
+): Promise<string> {
+  const session = createOauthSession(port, config, accountId);
+  const clientId = await session.register();
+  let stop = await session.authorize({ clientId });
+  for (let approvals = 0; stop.kind === "interaction" && approvals < 4; approvals++) {
+    const allow = stop.formActions[0];
+    if (!allow) throw new Error("OAuth consent form missing");
+    stop = await session.submit(allow);
   }
-  if (!code) throw new Error("OAuth helper: no authorization code");
-
-  const tokenRes = await visit(mcpPath(asm.token_endpoint, mcpHost), {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: REDIRECT_URI,
-      client_id: client.client_id,
-      code_verifier: verifier,
-      resource: prm.resource,
-    }).toString(),
-  });
-  const tokens = JSON.parse(tokenRes.body) as { access_token?: string };
-  if (!tokens.access_token) throw new Error("OAuth helper: no access_token");
+  if (stop.kind !== "callback") {
+    throw new Error(`OAuth helper stopped at ${stop.kind}`);
+  }
+  if (!stop.code) throw new Error(`OAuth helper: no authorization code (${stop.error})`);
+  const tokens = await session.exchange({ clientId, code: stop.code });
+  if (typeof tokens.access_token !== "string") throw new Error("OAuth helper: no access_token");
   return tokens.access_token;
 }
