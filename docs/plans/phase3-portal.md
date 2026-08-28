@@ -675,7 +675,7 @@ Execute in order.
 | **7** | `/connect/chatgpt` guided page | Honest alpha steps — **complete** |
 | **8** | Disconnect modal + CSRF middleware + `POST /v1/portal/connections/:provider/disconnect` | Revoke all provider grants — **complete** |
 | **9** | Clerk Production + subdomain allowlist + `authorizedParties` + Railway `app` DNS | Production validation §17 — **complete** (Jake cutover) |
-| **10** | `scripts/portal-smoke.ts` + expand `docs/phase3-validation.md` | CI green |
+| **10** | `scripts/portal-smoke.ts` + `docs/phase3-validation.md` | CI green — **complete** |
 
 **Do not start slice 9 until slices 0–8 pass locally.**
 
@@ -702,15 +702,15 @@ Execute in order.
 
 - [x] Plan approved before coding (this document, amended 2026-08-20)
 - [ ] Framer Get Started → `app.reachmy.ai` (out of scope for Phase 3 — operator handles separately)
-- [ ] Connect Claude and/or ChatGPT **before** Agent Name claim
-- [ ] Provisional principal + claim on **same** principal
-- [ ] Conversational claim via MCP `create_identity` works after Connect
-- [ ] Safe connection overview; no OAuth leakage
-- [ ] Disconnect: CSRF + backend revoke all provider grants; Agent Name remains
-- [ ] `/admin` denied without `platform_role=admin`
-- [ ] No forbidden daily-workflow UI
-- [ ] MCP issuer/resource unchanged
-- [x] `docs/phase3-validation.md` started (Slice 9 Jake cutover; full Phase 3 close in Slice 10)
+- [x] Connect Claude and/or ChatGPT **before** Agent Name claim
+- [x] Provisional principal + claim on **same** principal
+- [x] Conversational claim via MCP `create_identity` works after Connect
+- [x] Safe connection overview; no OAuth leakage
+- [x] Disconnect: CSRF + backend revoke all provider grants; Agent Name remains
+- [x] `/admin` denied without `platform_role=admin`
+- [x] No forbidden daily-workflow UI
+- [x] MCP issuer/resource unchanged
+- [x] `docs/phase3-validation.md` at close — **PASSED** (2026-08-28)
 
 ---
 

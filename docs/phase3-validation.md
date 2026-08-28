@@ -1,21 +1,80 @@
-# Phase 3 validation — Slice 9 production cutover (Jake)
+# Phase 3 validation — PASSED
 
-**Date:** 2026-08-28  
+**Date closed:** 2026-08-28  
 **Canonical MCP host:** `https://mcp.reachmy.ai`  
 **MCP resource:** `https://mcp.reachmy.ai/mcp`  
 **Portal host:** `https://app.reachmy.ai`  
 **Report:** this file  
-**Gate:** Slice 9 (Jake Clerk Production cutover + production auth validation) closed. Slice 10 not started.
+**Gate:** Phase 3 closed. Phase 4 not started.
 
 ---
 
 ## Summary
 
-Slice 9 production work validated **Clerk Production** on Railway, **Jake-only** Neon `clerk_user_id` remap, real Production Portal sign-in, identity continuity for `@jakebotberg`, and the **Portal → MCP Clerk bridge** without a second Google login.
+Phase 3 delivered the **ReachMy Portal** at `app.reachmy.ai` on the same Railway service as MCP/OAuth, with host-based routing, Clerk Production auth, safe connection overview, Connect Claude/ChatGPT flows, disconnect with CSRF, and Jake-only Production Clerk cutover validated in production.
 
-Slices **0–8** were complete before this cutover. Slice **10** (`scripts/portal-smoke.ts`, expanded validation automation) remains the next implementation slice.
+**Portal smoke:** `pnpm smoke:portal` (`scripts/portal-smoke.ts`) exercises Portal host health, sign-in, host isolation, MCP health, authenticated overview DTO safety, and non-admin `/admin` 403.
 
-**Deferred operator item (Slice 9 plan table):** Framer `reachmy.ai` Get Started / Sign In links still point at their pre-Portal targets until updated manually. This does not block Slice 10 coding.
+**Out of scope (not a Phase 3 blocker):** Framer marketing link updates — operator handles separately.
+
+---
+
+## Slice status
+
+| Slice | Scope | Status |
+|---|---|---|
+| 0 | Host routing, Portal/MCP split, health | **Complete** |
+| 1 | `platform_role`, `/admin` gate | **Complete** |
+| 2 | Provisional principal, `createIdentity` extension | **Complete** |
+| 3 | MCP Clerk bridge (`resolveBrowserAccountId`) | **Complete** |
+| 4 | `listPortalAiConnections`, `/v1/portal/overview` | **Complete** |
+| 5 | Portal UI (sign-in, home, account) | **Complete** |
+| 6 | Connect Claude prefilled URL | **Complete** |
+| 7 | Connect ChatGPT guided page | **Complete** |
+| 8 | Disconnect modal + CSRF | **Complete** |
+| 9 | Clerk Production + Jake cutover + production auth | **Complete** |
+| 10 | `portal-smoke.ts` + this validation report | **Complete** |
+
+---
+
+## Phase 3 exit criteria mapping
+
+| Criterion | Evidence |
+|---|---|
+| Plan approved | [`docs/plans/phase3-portal.md`](plans/phase3-portal.md) |
+| Clerk Production before production Portal | Slice 9 production validation (Jake) |
+| Portal at `app.reachmy.ai` | Deployed; health 200 |
+| Connect Claude / ChatGPT before Agent Name claim | `tests/phase3-slice2.test.ts` |
+| Provisional principal + same-principal claim | `tests/phase3-slice2.test.ts` |
+| Conversational `create_identity` after Connect | `tests/phase3-slice2.test.ts`, MCP tools |
+| Safe connection overview (no OAuth leakage) | `tests/phase3-slice4.test.ts`, `pnpm smoke:portal` |
+| Disconnect: CSRF + revoke all provider grants | `tests/phase3-slice8.test.ts` |
+| `/admin` denied without `platform_role=admin` | `tests/phase3-slice1.test.ts`, `pnpm smoke:portal` |
+| No forbidden daily-workflow UI | Portal route map §6 (slices 5–8) |
+| MCP issuer/resource unchanged | `pnpm smoke:portal`, production health |
+| Framer → Portal links | **Out of scope** — operator handles separately |
+| Validation report | This file |
+
+---
+
+## Portal smoke (`pnpm smoke:portal`)
+
+Run 2026-08-28 — **10/10 checks pass:**
+
+| Check | Result |
+|---|---|
+| Portal `/health` → 200, `surface=portal` | Pass |
+| Unauthenticated `/` → redirect `/sign-in` | Pass |
+| `/sign-in` renders ReachMy + Clerk bridge | Pass |
+| Portal host blocks `/mcp` | Pass |
+| Portal host blocks `/.well-known/oauth-authorization-server` | Pass |
+| Portal host blocks `/.well-known/oauth-protected-resource` | Pass |
+| Portal host blocks `/auth` | Pass |
+| MCP `/health` → 200, `surface=mcp`, issuer unchanged | Pass |
+| Authenticated `/v1/portal/overview` → safe DTO | Pass |
+| Non-admin `/admin` → 403 | Pass |
+
+Local only — uses development Neon via `.env`; production DB guard enforced by `loadConfig()`.
 
 ---
 
@@ -34,7 +93,7 @@ Slices **0–8** were complete before this cutover. Slice **10** (`scripts/porta
 
 ---
 
-## Jake Clerk Production migration
+## Jake Clerk Production migration (Slice 9)
 
 ### Neon remap (2026-08-28)
 
@@ -45,75 +104,29 @@ Atomic production transaction remapped **only** `accounts.clerk_user_id` for `@j
 | Before (Dev) | `user_3I4GEMsFuxECI5ZDo0o7dAgvbuV` |
 | After (Prod) | `user_3IWJr7h5jpvnmAs8DA3BJmnjAF1` |
 
-**Preserved:** `account_id`, `principal_id`, Agent Name `@jakebotberg`, connected AI grants (3), relationship rows (1), interaction rows (3). Email remained `NULL` (acceptable).
+**Preserved:** `account_id`, `principal_id`, Agent Name `@jakebotberg`, connected AI grants (3), relationship rows (1), interaction rows (3).
 
 Script: [`scripts/jake-clerk-production-cutover.sql`](../scripts/jake-clerk-production-cutover.sql)
 
 ### Railway Clerk key cutover
 
-`CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` switched to Production `pk_live_` / `sk_live_` on the active deploy. Verified via page source on `https://app.reachmy.ai/sign-in`.
+`CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` switched to Production `pk_live_` / `sk_live_` on the active deploy.
 
-**Incident:** First key-update attempt did not apply to the serving deployment; page source still showed `pk_test_`. A second update to the active production service fixed this.
+**Incident:** First key-update attempt did not apply to the serving deployment; page source still showed `pk_test_`. A second update fixed this.
 
 ### Orphan account incident (resolved)
 
-While Railway still served `pk_test_`, a Production Portal sign-in after the Neon remap created a **blank** ReachMy account:
+While Railway still served `pk_test_`, a Production Portal sign-in after the Neon remap created a blank account (`4b88d007-…`, Dev Clerk ID). After Production keys were live, sign-in resolved `@jakebotberg` correctly. Orphan deleted atomically; canonical identity verified intact.
 
-| Field | Value |
+### Production validation (Jake)
+
+| Check | Result |
 |---|---|
-| `account_id` | `4b88d007-80bc-4bc9-98fa-9191662446b1` |
-| `clerk_user_id` | `user_3I4GEMsFuxECI5ZDo0o7dAgvbuV` (Dev ID) |
-| State | No principal, no handle, no grants |
-
-**Cause:** Dev Clerk JWT `sub` no longer matched canonical Jake after remap → `upsertAccountByClerkUser` inserted a new row.
-
-**Resolution:** After Railway Production keys were live, Portal sign-in correctly resolved `@jakebotberg`. Orphan row deleted atomically in production Neon (2026-08-28). Canonical identity verified intact post-delete.
-
----
-
-## Production validation results (Jake / Slice 9)
-
-| # | Check (§17) | Result | Notes |
-|---|---|---|---|
-| 1 | Framer → Portal | **Deferred** | Operator update pending |
-| 2 | Clerk Production | **Pass** | Live keys; subdomain allowlist + `authorizedParties` configured in Clerk |
-| 3 | SSO (Portal → MCP) | **Pass** | Same browser: `app.reachmy.ai` signed in → `mcp.reachmy.ai/sign-in?redirect=/security` → no second Google; landed on `/security` with existing agents |
-| 4–6 | New user / connect-before-claim / AI claim | **Not re-run in prod** | Covered by Slices 0–8 automated tests |
-| 7 | Connect ChatGPT guided page | **Not re-run in prod** | Slice 7 complete in dev |
-| 8 | Overview safety | **Pass** (Portal) | Jake Portal home shows user-facing labels only |
-| 9 | Disconnect | **Not re-run in prod** | Slice 8 complete in dev |
-| 10 | Admin 403 | **Not re-run in prod** | Slice 1 complete in dev |
-| 11 | Issuer unchanged | **Pass** | `https://mcp.reachmy.ai` |
-| 12 | Regression | **Pass** | `pnpm typecheck`; `pnpm test` 125/125 |
-
-### Jake identity continuity (production Neon, post cutover)
-
-| Field | Value |
-|---|---|
-| Agent Name | `@jakebotberg` |
-| `account_id` | `ba0ec12a-4375-43c8-8be1-0e16b5c36269` |
-| `principal_id` | `baad6069-94a1-400b-b7c8-33ec5c19a44a` |
-| `clerk_user_id` | `user_3IWJr7h5jpvnmAs8DA3BJmnjAF1` |
-| Connected AI grants | 3 |
-| Relationship rows | 1 |
-| Interaction rows | 3 |
-| Duplicate `@jakebotberg` accounts | 0 |
-
-### Portal production sign-in (2026-08-28)
-
-- URL: `https://app.reachmy.ai/sign-in`
-- Google: `jakefriedberg32@gmail.com`
-- Result: Portal home — `@jakebotberg`, Claude **Connected**, ChatGPT **Connected**
-
----
-
-## Slice status
-
-| Slice | Scope | Status |
-|---|---|---|
-| 0–8 | Portal foundation through disconnect | **Complete** (deployed) |
-| **9** | Clerk Production + Jake cutover + production auth validation | **Complete** |
-| 10 | `portal-smoke.ts` + validation automation | **Not started** |
+| Portal sign-in → `@jakebotberg` | Pass |
+| Claude + ChatGPT Connected | Pass |
+| Neon continuity (8/8) | Pass |
+| Portal → MCP Clerk bridge (no second Google) | Pass |
+| MCP issuer | `https://mcp.reachmy.ai` — unchanged |
 
 ---
 
@@ -122,8 +135,9 @@ While Railway still served `pk_test_`, a Production Portal sign-in after the Neo
 Run 2026-08-28:
 
 ```text
-pnpm typecheck   — pass
-pnpm test        — 125/125 pass
+pnpm typecheck     — pass
+pnpm test          — 125/125 pass
+pnpm smoke:portal  — 10/10 pass
 ```
 
 ---
@@ -132,14 +146,14 @@ pnpm test        — 125/125 pass
 
 | Item | Plan |
 |---|---|
-| Framer marketing links → `app.reachmy.ai` | Out of scope — operator handles separately; not a Phase 3 blocker |
-| Margot Clerk Production migration | Separate later cutover; out of scope for Jake Slice 9 |
-| Full §17 new-user / disconnect prod re-validation | Accepted via Slices 0–8 automated coverage |
+| Framer marketing links | Out of scope for Phase 3 — operator handles separately |
+| Margot Clerk Production migration | Separate later cutover |
 | `/security` on mcp host | Leave temporarily per Phase 3 plan |
 | Conditional handoff tickets | Not required — subdomain Clerk bridge passed |
+| Full §17 new-user / disconnect prod re-validation | Accepted via automated Slice 0–8 tests + portal smoke |
 
 ---
 
 ## Next step
 
-Slice **10:** `scripts/portal-smoke.ts` and expand this validation report as Phase 3 approaches full close.
+Phase **4** — Headless conversational UX per [`docs/implementation-plan.md`](implementation-plan.md). Do not start until explicitly approved.
