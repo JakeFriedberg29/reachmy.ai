@@ -4,7 +4,7 @@ import { getRequestListener } from "@hono/node-server";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { createMcpHonoApp } from "@modelcontextprotocol/hono";
 import type { Context } from "hono";
-import type { AppConfig } from "./config.js";
+import { isProductionRuntime, type AppConfig } from "./config.js";
 import type { Database } from "./db/client.js";
 import type { SigningJwks } from "./db/jwks.js";
 import { createDrizzleAdapter } from "./auth/drizzle-adapter.js";
@@ -154,10 +154,15 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
     return c.html(renderInvite(c.req.param("token")));
   });
 
-  app.get("/dev/callback", (c) => {
-    c.header("content-type", "text/html; charset=utf-8");
-    return c.html(renderDevCallback(config, new URL(c.req.url).searchParams));
-  });
+  // Renders authorization responses on the developer's own screen during local spikes. It has no
+  // production purpose, and production also ships without the static client that targets it.
+  const devCallbackEnabled = !isProductionRuntime(config.publicUrl);
+  if (devCallbackEnabled) {
+    app.get("/dev/callback", (c) => {
+      c.header("content-type", "text/html; charset=utf-8");
+      return c.html(renderDevCallback(config, new URL(c.req.url).searchParams));
+    });
+  }
 
   const wwwAuthenticate = `Bearer realm="reachmy.ai", resource_metadata="${config.publicUrl}/.well-known/oauth-protected-resource", scope="identity:read interactions:write offline_access"`;
 
@@ -240,7 +245,7 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
       "/",
       "/health",
       "/mcp",
-      "/dev/callback",
+      ...(devCallbackEnabled ? ["/dev/callback"] : []),
       "/.well-known/oauth-protected-resource",
       "/.well-known/oauth-protected-resource/mcp",
     ];

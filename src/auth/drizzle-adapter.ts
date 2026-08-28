@@ -10,11 +10,21 @@ function expiresAtFrom(expiresIn?: number): Date | null {
   return new Date(Date.now() + expiresIn * 1000);
 }
 
+/**
+ * DCR clients are stored without `expiresIn`, so their rows are permanent. Stamping the
+ * registration time lets `purgeUnauthorizedClients` retire clients that never reached consent,
+ * without a schema change and without ever expiring a client a user actually authorized.
+ * `oidc-provider` strips unrecognized metadata before storing, so this key is never client-supplied.
+ */
+const REGISTERED_AT = "registered_at";
+
 export function createDrizzleAdapter(db: Database) {
   return class DrizzleAdapter implements Adapter {
     constructor(public model: string) {}
 
-    async upsert(id: string, payload: Payload, expiresIn?: number): Promise<void> {
+    async upsert(id: string, input: Payload, expiresIn?: number): Promise<void> {
+      const payload: Payload =
+        this.model === "Client" ? { ...input, [REGISTERED_AT]: new Date().toISOString() } : input;
       const expiresAt = expiresAtFrom(expiresIn);
       const grantId = typeof payload.grantId === "string" ? payload.grantId : null;
       const uid = typeof payload.uid === "string" ? payload.uid : null;
@@ -117,4 +127,32 @@ export function createDrizzleAdapter(db: Database) {
 
 export async function purgeExpiredOauthModels(db: Database): Promise<void> {
   await db.delete(oauthModels).where(and(sql`${oauthModels.expiresAt} is not null`, lte(oauthModels.expiresAt, new Date())));
+}
+
+/**
+ * Retire registered clients that never obtained a grant. Registration is open, so a client row
+ * costs nothing to create; consent is what makes one meaningful. Clients holding a grant are never
+ * touched, and neither are rows registered before stamping existed — pruning those would revoke
+ * working connectors.
+ */
+export async function purgeUnauthorizedClients(
+  db: Database,
+  options: { registeredBefore: Date },
+): Promise<number> {
+  const cutoff = options.registeredBefore.toISOString();
+  const deleted = await db
+    .delete(oauthModels)
+    .where(
+      and(
+        eq(oauthModels.model, "Client"),
+        sql`${oauthModels.payload} ->> 'registered_at' is not null`,
+        sql`(${oauthModels.payload} ->> 'registered_at')::timestamptz < ${cutoff}::timestamptz`,
+        sql`not exists (
+          select 1 from oauth_models granted
+          where granted.model = 'Grant' and granted.payload ->> 'clientId' = ${oauthModels.id}
+        )`,
+      ),
+    )
+    .returning({ id: oauthModels.id });
+  return deleted.length;
 }

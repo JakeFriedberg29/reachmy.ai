@@ -1,8 +1,8 @@
 # Phase 3.5 — Security Hardening & Repository Hygiene
 
-**Status:** Plan **approved** 2026-08-27. **Slices 1–4 complete.** Slices 5–8 not started.
-Slice 4 is implemented and covered by automated tests; its **required real-provider regression is
-still outstanding** (see §7 Slice 4).
+**Status:** Plan **approved** 2026-08-27. **Slices 1–5 complete.** Slices 6–8 not started.
+Slices 4 and 5 are implemented and covered by automated tests; their **required real-provider
+regression is still outstanding** and is now a single combined run (see §7 Slice 5 and decision 91).
 **Gate:** Phase 3 is **complete** and stays complete. Phase 4 has **not** started.
 **Type:** Small stabilization phase. Not a feature phase. Not a refactor phase.
 
@@ -239,7 +239,7 @@ hygiene, per operator instruction.
 | 2 | Fail-closed production `COOKIE_KEYS` | Low–Medium | — | **Complete** |
 | 3 | Shared HTTP test harness | Low | — | **Complete** |
 | 4 | Explicit OAuth consent | **Medium–High** | 3 | **Complete (pending provider regression)** |
-| 5 | DCR policy + metadata validation | Medium | 4 |
+| 5 | DCR policy + metadata validation | Medium | 4 | **Complete (pending provider regression)** |
 | 6a | Scope observability (report-only) | Low | 3 |
 | 6b | Scope issuance + enforcement | **High** | 6a, 4 |
 | 7 | CI + lint + format + test discovery | Low–Medium | 3 |
@@ -457,6 +457,50 @@ limit test.
 **Manual validation.** **Required.** Add a fresh Claude connector and a fresh ChatGPT connector
 end-to-end against a deployed build.
 
+**Outcome (code complete; provider regression outstanding).**
+
+DCR remains open and unauthenticated. Nothing was gated, and no rule reads provider, `client_name`,
+or redirect hostname — the automated suite includes a registration by an unrecognized client name at
+an unrecognized redirect host, which succeeds exactly like Claude's and ChatGPT's.
+
+**What `oidc-provider@9.11.3` already enforces**, read from `lib/helpers/client_schema.js` rather
+than assumed. It rejects fragments in redirect URIs (`:607`), requires at least one redirect URI when
+response types are present (`:283`), rejects non-web schemes for `web` clients (`:612`), and rejects
+`javascript:` / `data:` / `file:` and friends for `native` clients (`:640`). The https requirement at
+`:617` applies **only to the implicit flow**. So for a code-flow `web` client — the exact shape both
+providers register — plain `http:` is accepted on any hostname. That is the one real redirect gap,
+and it was confirmed empirically: with the new validator disabled, the `http://claude.ai/...`
+rejection test fails.
+
+**Controls added** (`src/auth/dcr-policy.ts`, wired in `src/auth/oidc.ts`):
+
+| Control (§4) | Delivered by |
+|---|---|
+| 1. Metadata validation | `validateClientMetadata`, reached through `extraClientMetadata` so static and dynamic clients pass through one code path |
+| 2. Rate limiting on `/reg` | In-memory fixed-window per-IP limiter, 20 per 10 minutes, answering `429` + `temporarily_unavailable` + `Retry-After` before the request reaches the adapter |
+| 3. Consent screen shows client identity | Already delivered by Slice 4 (`summarizeConsent`) — no new work |
+| 4. Retention for never-authorized clients | `registered_at` stamped on Client rows at write time; `purgeUnauthorizedClients` retires only stamped, aged, grant-less rows |
+| 5. Gate `phase-minus1-cli` and `/dev/callback` | `devStaticClients` returns `[]` in production; the `/dev/callback` route is not registered in production |
+
+The validation rules are deliberately narrow: reject `http:` off loopback, reject wildcards, cap
+redirect-URI count (10), `client_name` length (120), and redirect-URI length (2048). Everything else
+is left to the provider's native schema. In particular **custom schemes such as `myapp://callback`
+are still accepted for native clients**, because neither provider uses them and rejecting them would
+tighten interoperability on a guess (decision 88).
+
+Loopback `http:` stays registrable. It is the RFC 8252 native-app pattern, it is not remotely
+reachable, and the Phase -1 CLI client depends on it locally.
+
+**Retention is conservative by construction.** A Client row is retired only when it carries a
+`registered_at` stamp, is older than the caller's cutoff, **and** no `Grant` row references it. Rows
+written before stamping existed are never retired, so no client already live in production can be
+removed. No scheduler was added; the function is called deliberately.
+
+**Tests.** `tests/dcr-policy.test.ts` (9, pure — no DB or HTTP) and `tests/dcr-registration.test.ts`
+(13, HTTP over `tests/helpers-http.ts` per decision 81). Suite moves from **149 to 171 pass**.
+Verified non-vacuous: with `validateClientMetadata` neutralized, exactly the three metadata-rejection
+tests fail and every interoperability test still passes.
+
 ---
 
 ### Slice 6a — Scope observability (report-only)
@@ -640,8 +684,13 @@ not a security issue. Do not spend slice time on it.
 | 84 | Consent is a two-outcome decision. Deny is a first-class route returning `access_denied`; it is not a dead-end page. |
 | 85 | A grant is only ever issued to the account that consented. `completeOauthInteraction` re-asserts login on any provider-session subject mismatch. |
 | 86 | **Slice 5 gate:** Slice 4's real Claude and ChatGPT reconnect regression must be run against a deployed build before Slice 5 ships, since Slice 5 also touches the connect path. |
+| 87 | Slice 5 code complete. DCR stays open and unauthenticated; safety comes from consent (Slice 4) plus transport, size, volume, and retention controls on registration. |
+| 88 | Redirect URI policy is exactly "no `http:` off loopback", plus no wildcards and size caps. Custom schemes remain allowed for native clients — `oidc-provider` already rejects the dangerous ones, and forbidding the rest would narrow interoperability on a guess about clients we have not observed. |
+| 89 | Client metadata policy runs through `oidc-provider`'s `extraClientMetadata` hook, so statically configured and dynamically registered clients are judged by the same code. |
+| 90 | DCR clients are stamped with `registered_at` when written. `purgeUnauthorizedClients` retires only rows that are stamped, past the cutoff, and referenced by no grant — so authorized clients and pre-stamping production rows are never removed. |
+| 91 | **Supersedes 86 in effect:** Slices 4 and 5 both change the connect path and are validated together in one real Claude and ChatGPT regression against a deployed build. Slice 5 is committed but not deployed until that run passes. |
 
 ---
 
-*End of Phase 3.5 plan. Slices 1–4 complete (Slice 4 pending real-provider regression). Slice 5 (DCR
-policy + client metadata validation) is next and has not started.*
+*End of Phase 3.5 plan. Slices 1–5 complete (Slices 4–5 pending a combined real-provider
+regression). Slice 6a (scope observability, report-only) is next and has not started.*
