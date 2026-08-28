@@ -13,6 +13,13 @@ import { sessionCookieHeader } from "./auth/session-cookie.js";
 import { createOidcProvider, logOauth, mcpResource, SCOPES } from "./auth/oidc.js";
 import { createTokenVerifier } from "./auth/verify-token.js";
 import { createNetworkMcpServer } from "./mcp/server.js";
+import {
+  describeJsonRpc,
+  logMcp,
+  newMcpRequestId,
+  traceResponseBody,
+  truncate,
+} from "./mcp/observability.js";
 import { resolveAccountId, type AppEnv } from "./http/context.js";
 import {
   classifyRequestHost,
@@ -167,19 +174,62 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
   const wwwAuthenticate = `Bearer realm="reachmy.ai", resource_metadata="${config.publicUrl}/.well-known/oauth-protected-resource", scope="identity:read interactions:write offline_access"`;
 
   app.all("/mcp", async (c: Context) => {
+    const requestId = newMcpRequestId();
+    const startedAt = Date.now();
     const authorization = c.req.header("authorization");
+
+    logMcp("mcp_request_received", {
+      request_id: requestId,
+      http_method: c.req.method,
+      accept: truncate(c.req.header("accept")),
+      content_type: truncate(c.req.header("content-type")),
+      mcp_protocol_version: truncate(c.req.header("mcp-protocol-version")),
+      has_mcp_session_id: Boolean(c.req.header("mcp-session-id")),
+      has_authorization: Boolean(authorization),
+      // Descriptive only (locked principle 13): identifies which AI is calling in the logs.
+      user_agent: truncate(c.req.header("user-agent"), 120),
+    });
+
     const principal = await verifyAccessToken(authorization);
+    logMcp("mcp_token_verified", {
+      request_id: requestId,
+      ok: Boolean(principal),
+      client_id: principal?.clientId ?? null,
+      grant_id: principal?.grantId ?? null,
+      has_connection: Boolean(principal?.connectionId),
+      onboarding: principal?.onboarding ?? null,
+      token_scopes: principal?.scopes ?? [],
+      ms: Date.now() - startedAt,
+    });
+
     if (!principal) {
+      logMcp("mcp_response_completed", {
+        request_id: requestId,
+        status: 401,
+        streamed: false,
+        completed: true,
+        bytes: null,
+        reason: "invalid_token",
+        ms: Date.now() - startedAt,
+      });
       return c.json(
         { error: "invalid_token", error_description: "Missing or invalid access token" },
         401,
         { "WWW-Authenticate": wwwAuthenticate },
       );
     }
+
+    logMcp("mcp_method_received", {
+      request_id: requestId,
+      client_id: principal.clientId,
+      grant_id: principal.grantId,
+      ...describeJsonRpc(c.get("parsedBody")),
+    });
+
     const authedHandler = createMcpHandler(() =>
-      createNetworkMcpServer({ db, principal, publicUrl: config.publicUrl }),
+      createNetworkMcpServer({ db, principal, publicUrl: config.publicUrl, requestId }),
     );
-    return authedHandler.fetch(c.req.raw, {
+    const response = await authedHandler.fetch(c.req.raw, {
       parsedBody: c.get("parsedBody"),
       authInfo: {
         token: authorization?.slice("Bearer ".length) ?? "",
@@ -190,6 +240,29 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
           principal_id: principal.principalId,
         },
       },
+    });
+
+    const contentType = response.headers.get("content-type");
+    const streamed = Boolean(response.body);
+    logMcp("mcp_response_started", {
+      request_id: requestId,
+      status: response.status,
+      content_type: truncate(contentType),
+      streamed,
+      ms: Date.now() - startedAt,
+    });
+
+    return traceResponseBody(response, (outcome) => {
+      logMcp("mcp_response_completed", {
+        request_id: requestId,
+        status: response.status,
+        content_type: truncate(contentType),
+        streamed,
+        completed: outcome.completed,
+        bytes: outcome.bytes,
+        reason: outcome.reason,
+        ms: Date.now() - startedAt,
+      });
     });
   });
 
@@ -206,6 +279,16 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
           path,
           status: res.statusCode,
           location: res.getHeader("location") ? String(res.getHeader("location")) : null,
+          ms: Date.now() - started,
+        });
+      }
+      // The socket actually ending is the ground truth an SSE exchange completed; its absence is
+      // the signature of a hung MCP response.
+      if (path.startsWith("/mcp")) {
+        logMcp("mcp_http_done", {
+          method: req.method,
+          path,
+          status: res.statusCode,
           ms: Date.now() - started,
         });
       }

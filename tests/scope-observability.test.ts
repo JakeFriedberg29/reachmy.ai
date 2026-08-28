@@ -19,7 +19,7 @@ import { createTokenVerifier } from "../src/auth/verify-token.js";
 import { executeTool, type McpToolContext } from "../src/mcp/tools.js";
 import type { VerifiedPrincipal } from "../src/auth/verify-token.js";
 import { upsertAccountByClerkUser } from "../src/domain/identity.js";
-import { withServer } from "./helpers-http.js";
+import { withServer, withServerOnPublicUrlPort } from "./helpers-http.js";
 import { createOauthSession } from "./helpers-oauth-token.js";
 import { suffix, testDb } from "./helpers.js";
 
@@ -206,8 +206,11 @@ async function sessionRefresh(
   return session.refresh({ clientId, refreshToken });
 }
 
+// Bound to the PUBLIC_URL port because the verifier fetches `${PUBLIC_URL}/jwks`, and the token
+// it checks is issued for that same issuer. On an ephemeral port this passed only when a separate
+// `pnpm dev` happened to be serving 3000.
 test("scope observability: verify-token exposes scopes from JWT access token", async () => {
-  await withServer(async (port, config) => {
+  await withServerOnPublicUrlPort(async (port, config) => {
     setClerkBrowserSessionResolverForTests(async () => null);
     const session = createOauthSession(port, config, await newAccountId("scope_verify"));
     const clientId = await session.register();

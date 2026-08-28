@@ -9,6 +9,8 @@ export type NetworkMcpOptions = {
   db: Database;
   principal: VerifiedPrincipal;
   publicUrl: string;
+  /** Correlates tool events with the HTTP request that carried them. Report-only. */
+  requestId?: string | null;
 };
 
 function tool(

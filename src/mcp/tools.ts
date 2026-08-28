@@ -1,5 +1,6 @@
 import { evaluateToolScope } from "../auth/scope-map.js";
 import { logScopeMcpWouldDeny } from "../auth/scope-observability.js";
+import { logMcp } from "./observability.js";
 import type { VerifiedPrincipal } from "../auth/verify-token.js";
 import type { Database } from "../db/client.js";
 import { CONNECTION_REVOKED, publicAgentConnection, revokeAgentConnection } from "../domain/connections.js";
@@ -38,6 +39,8 @@ export type McpToolContext = {
   db: Database;
   principal: VerifiedPrincipal;
   publicUrl: string;
+  /** Correlates tool events with the HTTP request that carried them. Report-only. */
+  requestId?: string | null;
 };
 
 const ONBOARDING_TOOLS = new Set(["get_my_identity", "get_identity", "create_identity", "resolve_identity"]);
@@ -116,6 +119,31 @@ function observeToolScope(ctx: McpToolContext, tool: string): void {
 }
 
 export async function executeTool(
+  ctx: McpToolContext,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const startedAt = Date.now();
+  logMcp("mcp_tool_call_started", {
+    request_id: ctx.requestId ?? null,
+    tool: name,
+    // Key names only: they come from the tool schema, values may carry user data.
+    arg_keys: Object.keys(args ?? {}),
+    client_id: ctx.principal.clientId,
+    grant_id: ctx.principal.grantId,
+  });
+  const result = await dispatchTool(ctx, name, args);
+  logMcp("mcp_tool_call_completed", {
+    request_id: ctx.requestId ?? null,
+    tool: name,
+    is_error: result.isError === true,
+    error_code: result.isError === true ? result.data.error : null,
+    ms: Date.now() - startedAt,
+  });
+  return result;
+}
+
+async function dispatchTool(
   ctx: McpToolContext,
   name: string,
   args: Record<string, unknown>,

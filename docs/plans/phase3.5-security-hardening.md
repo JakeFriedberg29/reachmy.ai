@@ -2,7 +2,9 @@
 
 **Status:** Plan **approved** 2026-08-27. **Slices 1–5 complete** (including combined real-provider regression).
 **Slice 6a code complete;** real Claude/ChatGPT scope observations still required before Slice 6b.
-Slices 6b–8 not started.
+A **Slice 6a diagnostic addendum** (report-only MCP transport observability) is code complete and
+undeployed — added because ChatGPT hangs on "Working" for simple tool requests, which blocks the
+provider scope observations 6b depends on. Slices 6b–8 not started.
 **Gate:** Phase 3 is **complete** and stays complete. Phase 4 has **not** started.
 **Type:** Small stabilization phase. Not a feature phase. Not a refactor phase.
 
@@ -558,6 +560,81 @@ nothing.
 
 ---
 
+### Slice 6a diagnostic addendum — MCP transport observability (report-only)
+
+**Why this was added.** Collecting the Slice 6a scope observations requires driving real tool calls
+from Claude and ChatGPT. ChatGPT instead sits indefinitely on "Working" for a request as simple as
+"What is my ReachMy identity?", and the deployed logs could not say why. Railway Network Logs for
+2026-08-28 ~13:50 show `POST /mcp → 200` three times, but Deploy Logs in the same window contain only
+`scope_token_observed` for the Claude `client_id` / `grant_id` on a `refresh` flow. Network Logs carry
+no client identity, so those 200s are most plausibly Claude, and **no ChatGPT-attributable `/mcp`
+traffic has ever been proven**.
+
+**The gap that made this unanswerable.** `logOauth("http_done")` covers only `/auth`, `/interaction`,
+`/reg`, and `/token`. A *successful* `/mcp` request emitted nothing at all, and an HTTP 200 on `/mcp`
+is not evidence of a completed exchange: Claude and ChatGPT are both legacy clients, so
+`createMcpHandler` routes them through the stateless legacy fallback, which answers `200` with
+`text/event-stream` headers **before** the tool runs. The automated trace test confirms this ordering
+directly — `mcp_response_started` is emitted between `mcp_tool_call_started` and
+`mcp_tool_call_completed`. A hang after the headers is therefore indistinguishable from success in
+Network Logs.
+
+**Events.** Emitted on a separate `mcp_debug` message so they are searchable independently of
+`oauth_debug`. Every event on one request shares a `request_id`.
+
+| Event | When | Fields (no secrets) |
+|---|---|---|
+| `mcp_request_received` | Entry to `/mcp`, before auth | `http_method`, `accept`, `content_type`, `mcp_protocol_version`, `has_mcp_session_id`, `has_authorization`, `user_agent` |
+| `mcp_token_verified` | After bearer verification | `ok`, `client_id`, `grant_id`, `has_connection`, `onboarding`, `token_scopes` |
+| `mcp_method_received` | Authenticated request, body parsed | `rpc_method`, `tool_name`, `rpc_id`, `batch_size`, `is_notification` |
+| `mcp_tool_call_started` | Entry to `executeTool` | `tool`, `arg_keys` (key names only), `client_id`, `grant_id` |
+| `mcp_tool_call_completed` | `executeTool` returned | `tool`, `is_error`, `error_code`, `ms` |
+| `mcp_response_started` | SDK handler returned a `Response` | `status`, `content_type`, `streamed` |
+| `mcp_response_completed` | Response body settled | `completed`, `bytes`, `reason` (`client_cancelled` / `stream_error` / `invalid_token`) |
+| `mcp_http_done` | Node socket `end()` for any `/mcp` path | `method`, `path`, `status`, `ms` — no `request_id`; it is the ground-truth socket close |
+
+**Interpretation matrix for the ChatGPT hang.**
+
+| Observed | Meaning |
+|---|---|
+| No `mcp_debug` for the attempt | ChatGPT never reached ReachMy |
+| `mcp_token_verified` `ok:false` only | 401 path; no tool ran |
+| Reaches `mcp_method_received`, no `mcp_tool_call_started` | Transport/protocol rejected before dispatch |
+| `mcp_tool_call_started` with no `..._completed` | Hang inside `executeTool` / domain code |
+| `mcp_tool_call_completed` but `mcp_response_completed` `completed:false` | ReachMy answered; the SSE stream did not finish |
+| Full chain, `completed:true`, `mcp_http_done` present | ReachMy finished; the hang is client-side |
+
+**Report-only, by construction.** `logMcp` swallows its own errors, no logged value is read by any
+authorization, transport, or protocol decision, and `traceResponseBody` re-emits the original status,
+status text, headers, and bytes. Sensitive keys are dropped by an allowlist-inverse regex; only
+`client_id`, `grant_id`, and `request_id` correlate. Tool **argument values** are never logged — key
+names only. `user_agent` is descriptive only (locked principle 13).
+
+**Files.** New `src/mcp/observability.ts`; `/mcp` route and the socket-close hook in `src/server.ts`;
+`executeTool` wrapper in `src/mcp/tools.ts` (dispatch body moved unchanged into `dispatchTool`);
+`requestId` threaded through `src/mcp/server.ts`.
+
+**Tests.** New `tests/mcp-http-transport.test.ts` (7) — the first tests that exercise a real
+`POST /mcp` over Streamable HTTP rather than calling `executeTool` directly. Covers the 401 challenge,
+`initialize`, `tools/list` against `ALL_MCP_TOOLS`, a `tools/call` whose SSE body arrives complete,
+`202` for notifications, `406` for a client that will not accept `text/event-stream`, and the full
+single-`request_id` trace including a no-secrets assertion. Suite moves from **181 to 188 pass**.
+
+Verified non-vacuous by construction: the trace test was first written asserting
+`mcp_response_started` *after* tool completion and failed, which is how the pre-tool SSE header
+ordering above was established.
+
+**One latent test defect fixed.** `scope observability: verify-token exposes scopes from JWT access
+token` built a verifier for `PUBLIC_URL` while serving on an ephemeral port, so it passed only when a
+separate `pnpm dev` happened to occupy port 3000 and failed (after a ~110s JWKS retry stall) otherwise.
+It now uses `withServerOnPublicUrlPort`, the helper added for the transport tests, which also waits for
+the shared port instead of failing when concurrent test files contend for it.
+
+**Deployment status.** Not deployed. Slice 6a's OAuth scope observability is live in production; this
+addendum is not.
+
+---
+
 ### Slice 6b — Scope issuance + enforcement
 
 **Objective.** Stop over-granting resource scopes. Enforce scopes at the MCP boundary.
@@ -722,8 +799,12 @@ not a security issue. Do not spend slice time on it.
 | 94 | **Slice 6a observability:** Report-only structured logs via existing `oauth_debug` stream — `scope_authorization_observed`, `scope_token_observed`, `scope_mcp_would_deny`. Proposed tool→scope map in `src/auth/scope-map.ts` includes `identity:write` for `create_identity` / disconnect tools (finding #9). No secrets logged; `client_id` and `grant_id` are allowed correlation identifiers. |
 | 95 | **Real-provider scope evidence collected so far (historical, not from 6a logs):** Phase 2 observed ChatGPT requests a narrower initial scope than Claude while grants still receive full resource scopes ([`docs/phase2-validation.md:130`](../phase2-validation.md)). Claude often includes `offline_access`; ChatGPT observed narrower. Consent screens from Slices 4–5 regression show requested scopes to the user but do not record provider-specific issuance in structured logs. Treat as leads only. |
 | 96 | **Slice 6b gate (unchanged):** Blocked until deployed Slice 6a captures structured `scope_authorization_observed` entries for at least one fresh Claude authorization and one fresh ChatGPT authorization, documenting requested scopes, granted scopes, `scope_expanded`, and any `scope_mcp_would_deny` patterns during normal tool use. |
+| 97 | **HTTP 200 on `/mcp` is not evidence of a completed exchange.** Legacy clients (Claude and ChatGPT) take the stateless legacy fallback, which returns `200` with `text/event-stream` headers before the tool runs — confirmed by the emitted event order in `tests/mcp-http-transport.test.ts`. Completion is proven by `mcp_response_completed` `completed:true` plus `mcp_http_done`, not by the status line in Railway Network Logs. |
+| 98 | **Slice 6a diagnostic addendum:** report-only MCP transport tracing on a separate `mcp_debug` stream (`mcp_request_received`, `mcp_token_verified`, `mcp_method_received`, `mcp_tool_call_started`, `mcp_tool_call_completed`, `mcp_response_started`, `mcp_response_completed`, `mcp_http_done`), correlated by `request_id`. Added to localize the ChatGPT "Working" hang, which also blocks collecting the Slice 6a provider scope observations. No authorization, transport, or protocol decision reads it; tool argument **values** are never logged. |
+| 99 | **Diagnostics do not authorize anything and must not be able to break a request.** `logMcp` swallows its own failures and `traceResponseBody` re-emits status, headers, and bytes unchanged. Any future observability follows the same rule. |
 
 ---
 
 *End of Phase 3.5 plan. Slices 1–5 complete (real-provider regression passed). Slice 6a code complete;
-real Claude/ChatGPT scope observations still required before Slice 6b.*
+real Claude/ChatGPT scope observations still required before Slice 6b. Slice 6a diagnostic addendum
+(MCP transport observability) code complete and not deployed; Slice 6b remains blocked.*

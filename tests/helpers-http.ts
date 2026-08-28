@@ -1,4 +1,5 @@
 import http from "node:http";
+import type { Server } from "node:http";
 import { eq } from "drizzle-orm";
 import { setClerkBrowserSessionResolverForTests } from "../src/auth/browser-account.js";
 import { encodeSessionCookie, SESSION_COOKIE } from "../src/auth/session-cookie.js";
@@ -81,6 +82,61 @@ export async function withServer(
   }
   try {
     await run(address.port, config);
+  } finally {
+    setClerkBrowserSessionResolverForTests(null);
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
+/** Test files run concurrently, so the shared port has to be waited for, not just claimed. */
+const PUBLIC_URL_PORT_WAIT_MS = 60_000;
+
+function listenExclusive(server: Server, port: number): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE") {
+        resolve(false);
+        return;
+      }
+      reject(error);
+    };
+    server.once("error", onError);
+    server.listen(port, "127.0.0.1", () => {
+      server.removeListener("error", onError);
+      resolve(true);
+    });
+  });
+}
+
+/**
+ * Same as `withServer`, but bound to the port in `PUBLIC_URL` instead of an ephemeral one.
+ *
+ * MCP bearer verification fetches `${PUBLIC_URL}/jwks` over HTTP, so a token can only be verified
+ * when the running server is reachable at that URL. Tests that verify a real access token need
+ * this; everything else should keep using `withServer`.
+ */
+export async function withServerOnPublicUrlPort(
+  run: (port: number, config: AppConfig) => Promise<void>,
+): Promise<void> {
+  const config = loadConfig();
+  const url = new URL(config.publicUrl);
+  const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+  const db = await testDb();
+  const jwks = await loadOrCreateJwks(db);
+  const server = await createHttpServer(config, db, jwks);
+  const deadline = Date.now() + PUBLIC_URL_PORT_WAIT_MS;
+  while (!(await listenExclusive(server, port))) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Port ${port} (from PUBLIC_URL=${config.publicUrl}) stayed in use. Stop \`pnpm dev\` and re-run.`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  try {
+    await run(port, config);
   } finally {
     setClerkBrowserSessionResolverForTests(null);
     await new Promise<void>((resolve, reject) => {
