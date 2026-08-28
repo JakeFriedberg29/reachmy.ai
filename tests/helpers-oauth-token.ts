@@ -269,6 +269,25 @@ export function createOauthSession(port: number, config: AppConfig, accountId: s
       });
       return JSON.parse(res.body) as Record<string, unknown>;
     },
+
+    async refresh(input: {
+      clientId: string;
+      refreshToken: string;
+      resource?: string;
+    }): Promise<Record<string, unknown>> {
+      const meta = await discover();
+      const res = await visit(mcpPath(meta.tokenEndpoint, mcpHost), {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: input.refreshToken,
+          client_id: input.clientId,
+          resource: input.resource ?? meta.resource,
+        }).toString(),
+      });
+      return JSON.parse(res.body) as Record<string, unknown>;
+    },
   };
 }
 

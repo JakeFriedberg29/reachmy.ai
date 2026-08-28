@@ -1,8 +1,8 @@
 # Phase 3.5 — Security Hardening & Repository Hygiene
 
-**Status:** Plan **approved** 2026-08-27. **Slices 1–5 complete.** Slices 6–8 not started.
-Slices 4 and 5 are implemented and covered by automated tests; their **required real-provider
-regression is still outstanding** and is now a single combined run (see §7 Slice 5 and decision 91).
+**Status:** Plan **approved** 2026-08-27. **Slices 1–5 complete** (including combined real-provider regression).
+**Slice 6a code complete;** real Claude/ChatGPT scope observations still required before Slice 6b.
+Slices 6b–8 not started.
 **Gate:** Phase 3 is **complete** and stays complete. Phase 4 has **not** started.
 **Type:** Small stabilization phase. Not a feature phase. Not a refactor phase.
 
@@ -240,7 +240,7 @@ hygiene, per operator instruction.
 | 3 | Shared HTTP test harness | Low | — | **Complete** |
 | 4 | Explicit OAuth consent | **Medium–High** | 3 | **Complete (pending provider regression)** |
 | 5 | DCR policy + metadata validation | Medium | 4 | **Complete (pending provider regression)** |
-| 6a | Scope observability (report-only) | Low | 3 |
+| 6a | Scope observability (report-only) | Low | 3 | **Code complete (pending real-provider scope observations)** |
 | 6b | Scope issuance + enforcement | **High** | 6a, 4 |
 | 7 | CI + lint + format + test discovery | Low–Medium | 3 |
 | 8 | Docs + repository hygiene | Low | all |
@@ -528,6 +528,34 @@ module, `src/mcp/tools.ts` (report-only check).
 would-be denials). Do not narrow scope issuance until real authorization requests have been
 observed.
 
+**Outcome (code complete; real-provider scope observations outstanding).**
+
+Structured scope observations are emitted through the existing `logOauth` / `oauth_debug` JSON log
+stream — no new observability system. Three report-only events:
+
+| Event | When | Fields (no secrets) |
+|---|---|---|
+| `scope_authorization_observed` | OAuth consent completion (`completeOauthInteraction`) | `client_id`, descriptive `client_name` / `redirect_host`, `flow_kind` (`initial_authorization` \| `reauthorization`), `prompt_name`, `grant_id`, `requested_scopes`, `granted_oidc_scopes`, `granted_resource_scopes`, `scope_expanded` |
+| `scope_token_observed` | Access token issued (`authorization_code` or `refresh`) | `flow_kind`, `client_id`, `grant_id`, `token_scopes` |
+| `scope_mcp_would_deny` | MCP tool call where token scopes would not satisfy the proposed tool→scope map | `tool`, `required_scope`, `granted_scopes`, `client_id`, `grant_id` |
+
+Implementation: `src/auth/scope-map.ts` (proposed tool→scope map), `src/auth/scope-observability.ts`
+(build/log helpers), logging wired in `src/auth/oidc.ts`, scopes exposed on `VerifiedPrincipal` in
+`src/auth/verify-token.ts`, report-only check at the top of `executeTool` in `src/mcp/tools.ts`.
+MCP `authInfo.scopes` now reflects token scopes rather than a hardcoded placeholder.
+
+**Current issuance behavior (unchanged — observation only):** OIDC scopes honor the client
+request (`grant.addOIDCScope(paramScope || SCOPES)`). Resource scopes for the MCP audience are
+**always expanded to the full `SCOPES` set** (`grant.addResourceScope(indicator, SCOPES)`). The
+`scope_defaulted` middleware still applies the full scope set when a client omits `scope`.
+
+**Current MCP enforcement behavior (unchanged — observation only):** Valid bearer tokens are
+accepted; domain authorization remains authoritative. The tool→scope map is evaluated in
+report-only mode only — `scope_mcp_would_deny` logs what *would* be blocked in Slice 6b but denies
+nothing.
+
+**Tests.** `tests/scope-observability.test.ts` (10). Suite moves from **171 to 181 pass**.
+
 ---
 
 ### Slice 6b — Scope issuance + enforcement
@@ -688,9 +716,14 @@ not a security issue. Do not spend slice time on it.
 | 88 | Redirect URI policy is exactly "no `http:` off loopback", plus no wildcards and size caps. Custom schemes remain allowed for native clients — `oidc-provider` already rejects the dangerous ones, and forbidding the rest would narrow interoperability on a guess about clients we have not observed. |
 | 89 | Client metadata policy runs through `oidc-provider`'s `extraClientMetadata` hook, so statically configured and dynamically registered clients are judged by the same code. |
 | 90 | DCR clients are stamped with `registered_at` when written. `purgeUnauthorizedClients` retires only rows that are stamped, past the cutoff, and referenced by no grant — so authorized clients and pre-stamping production rows are never removed. |
-| 91 | **Supersedes 86 in effect:** Slices 4 and 5 both change the connect path and are validated together in one real Claude and ChatGPT regression against a deployed build. Slice 5 is committed but not deployed until that run passes. |
+| 91 | **Supersedes 86 in effect:** Slices 4 and 5 both change the connect path and are validated together in one real Claude and ChatGPT regression against a deployed build. Slice 5 is committed but not deployed until that run passes. **Update 2026-08-28:** combined real-provider regression passed — fresh Claude and ChatGPT connector registration/authorization, consent screen, existing `@jakebotberg` identity and connections intact, DCR still works with both providers. |
+| 92 | **Current scope issuance (pre-6b):** OIDC scopes honor the client request; MCP resource scopes are unconditionally expanded to the full supported set in `applyRequestedGrant`. Clients that omit `scope` receive the full set via `scope_defaulted` middleware. |
+| 93 | **Current MCP scope enforcement (pre-6b):** None at the OAuth-scope boundary. Any valid MCP bearer token passes; `src/domain/` authorization remains authoritative. |
+| 94 | **Slice 6a observability:** Report-only structured logs via existing `oauth_debug` stream — `scope_authorization_observed`, `scope_token_observed`, `scope_mcp_would_deny`. Proposed tool→scope map in `src/auth/scope-map.ts` includes `identity:write` for `create_identity` / disconnect tools (finding #9). No secrets logged; `client_id` and `grant_id` are allowed correlation identifiers. |
+| 95 | **Real-provider scope evidence collected so far (historical, not from 6a logs):** Phase 2 observed ChatGPT requests a narrower initial scope than Claude while grants still receive full resource scopes ([`docs/phase2-validation.md:130`](../phase2-validation.md)). Claude often includes `offline_access`; ChatGPT observed narrower. Consent screens from Slices 4–5 regression show requested scopes to the user but do not record provider-specific issuance in structured logs. Treat as leads only. |
+| 96 | **Slice 6b gate (unchanged):** Blocked until deployed Slice 6a captures structured `scope_authorization_observed` entries for at least one fresh Claude authorization and one fresh ChatGPT authorization, documenting requested scopes, granted scopes, `scope_expanded`, and any `scope_mcp_would_deny` patterns during normal tool use. |
 
 ---
 
-*End of Phase 3.5 plan. Slices 1–5 complete (Slices 4–5 pending a combined real-provider
-regression). Slice 6a (scope observability, report-only) is next and has not started.*
+*End of Phase 3.5 plan. Slices 1–5 complete (real-provider regression passed). Slice 6a code complete;
+real Claude/ChatGPT scope observations still required before Slice 6b.*

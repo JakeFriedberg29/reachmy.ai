@@ -184,7 +184,7 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
       authInfo: {
         token: authorization?.slice("Bearer ".length) ?? "",
         clientId: principal.clientId ?? "oauth",
-        scopes: ["identity:read", "interactions:write", "offline_access"],
+        scopes: principal.scopes,
         extra: {
           account_id: principal.accountId,
           principal_id: principal.principalId,

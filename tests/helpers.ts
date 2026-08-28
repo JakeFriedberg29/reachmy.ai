@@ -6,6 +6,9 @@ import { provisionTestPrincipal, upsertGrantConnection } from "../src/domain/ide
 import type { Actor } from "../src/domain/types.js";
 import { ensureApiConnection } from "../src/domain/identity.js";
 import type { VerifiedPrincipal } from "../src/auth/verify-token.js";
+import { SCOPES } from "../src/auth/oidc.js";
+
+export const FULL_OAUTH_SCOPES = SCOPES.split(" ");
 
 let shared: { db: Database; sql: ReturnType<typeof createSql> } | null = null;
 
@@ -80,6 +83,7 @@ export async function makeGrantPrincipal(
       clientId: grantId,
       connectionId,
       onboarding: "complete",
+      scopes: [...FULL_OAUTH_SCOPES],
     },
   };
 }

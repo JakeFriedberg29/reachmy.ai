@@ -1,3 +1,5 @@
+import { evaluateToolScope } from "../auth/scope-map.js";
+import { logScopeMcpWouldDeny } from "../auth/scope-observability.js";
 import type { VerifiedPrincipal } from "../auth/verify-token.js";
 import type { Database } from "../db/client.js";
 import { CONNECTION_REVOKED, publicAgentConnection, revokeAgentConnection } from "../domain/connections.js";
@@ -101,6 +103,18 @@ function mcpIdentity(
   };
 }
 
+function observeToolScope(ctx: McpToolContext, tool: string): void {
+  const { requiredScope, wouldDeny } = evaluateToolScope(tool, ctx.principal.scopes);
+  if (!wouldDeny || !requiredScope) return;
+  logScopeMcpWouldDeny({
+    tool,
+    required_scope: requiredScope,
+    granted_scopes: [...ctx.principal.scopes],
+    client_id: ctx.principal.clientId,
+    grant_id: ctx.principal.grantId,
+  });
+}
+
 export async function executeTool(
   ctx: McpToolContext,
   name: string,
@@ -108,6 +122,7 @@ export async function executeTool(
 ): Promise<ToolResult> {
   try {
     await assertConnectionNotRevoked(ctx);
+    observeToolScope(ctx, name);
     switch (name) {
       case "get_identity":
       case "get_my_identity":

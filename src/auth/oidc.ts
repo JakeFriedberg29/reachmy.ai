@@ -10,6 +10,11 @@ import {
   DCR_RATE_LIMIT,
   validateClientMetadata,
 } from "./dcr-policy.js";
+import {
+  buildScopeAuthorizationObservation,
+  logScopeAuthorization,
+  logScopeTokenIssuance,
+} from "./scope-observability.js";
 
 export const SCOPES =
   "openid identity:read contacts:read contacts:write interactions:read interactions:write proposals:write approvals:write offline_access";
@@ -323,6 +328,24 @@ export function createOidcProvider(
     });
   });
 
+  // Report-only: record scopes placed into issued access tokens (authorization code + refresh).
+  provider.use(async (ctx, next) => {
+    await next();
+    if (ctx.method !== "POST" || ctx.path !== "/token" || ctx.status !== 200) return;
+    const grantType = ctx.oidc?.params?.grant_type;
+    if (grantType !== "authorization_code" && grantType !== "refresh_token") return;
+    const accessToken = ctx.oidc?.entities?.AccessToken;
+    if (!accessToken) return;
+    logScopeTokenIssuance({
+      flow_kind: grantType === "refresh_token" ? "refresh" : "authorization_code",
+      client_id: String(accessToken.clientId ?? ""),
+      grant_id: typeof accessToken.grantId === "string" ? accessToken.grantId : null,
+      token_scopes: String(accessToken.scope ?? "")
+        .split(" ")
+        .filter(Boolean),
+    });
+  });
+
   return provider;
 }
 
@@ -372,7 +395,29 @@ export async function completeOauthInteraction(
   } else {
     grant = new provider.Grant({ accountId, clientId });
   }
-  applyRequestedGrant(grant, details, mcpResource(config.publicUrl));
+  const defaultResource = mcpResource(config.publicUrl);
+  const resources = requestedResources(details);
+  if (!resources.includes(defaultResource)) resources.push(defaultResource);
+  applyRequestedGrant(grant, details, defaultResource);
+
+  let redirectHost: string | null = null;
+  if (redirectUri) {
+    try {
+      redirectHost = new URL(redirectUri).host;
+    } catch {
+      redirectHost = null;
+    }
+  }
+  logScopeAuthorization(
+    buildScopeAuthorizationObservation({
+      details,
+      grant,
+      clientName: typeof client?.clientName === "string" ? client.clientName : null,
+      redirectHost,
+      resourceIndicators: resources,
+    }),
+  );
+
   const savedGrantId = await grant.save();
 
   const result: {

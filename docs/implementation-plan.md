@@ -354,7 +354,7 @@ Same Railway service, same Neon, same domain services. Framer stays on `reachmy.
 
 **Exit criteria:** See Phase 3.5 plan §8. Claude and ChatGPT must still connect and operate.
 
-**Status:** **Current.** Slices 1–5 complete; Slices 4–5 await a combined real Claude/ChatGPT regression on a deployed build. Slice 6a (scope observability, report-only) is next.
+**Status:** **Current.** Slices 1–5 complete (real-provider regression passed). Slice 6a code complete; real Claude/ChatGPT scope observations required before Slice 6b.
 
 #### Phase 4 — Headless conversational UX
 
