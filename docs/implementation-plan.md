@@ -4,7 +4,7 @@
 
 **This revision is documentation only.** No application code until this plan is reviewed. After approval, resume **Phase 2 Tests A/B only**. Do not start Phase 3 coding until a dedicated Phase 3 plan (`docs/plans/phase3-portal.md`) is written and approved.
 
-**Current execution state:** Phases -1, 0, 1, and **2** are complete. Report: [`docs/phase2-validation.md`](phase2-validation.md). **Phase 3 plan approved** (amended 2026-08-20): [`docs/plans/phase3-portal.md`](plans/phase3-portal.md). Implementation may begin per plan slices; do not skip approved gates (Clerk Production before production launch).
+**Current execution state:** Phases -1, 0, 1, and **2** are complete. Report: [`docs/phase2-validation.md`](phase2-validation.md). **Phase 3** in progress: Slices **0–9** complete (Portal deployed; Jake Clerk Production cutover validated). Report: [`docs/phase3-validation.md`](phase3-validation.md). Next: Slice **10** per [`docs/plans/phase3-portal.md`](plans/phase3-portal.md) §19.
 
 Shipped schema, OAuth issuer/resource, domain services, and MCP tools remain as implemented unless a later approved phase changes them. This document does not reopen Phase 0/1 architecture.
 
