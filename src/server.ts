@@ -190,26 +190,27 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
       user_agent: truncate(c.req.header("user-agent"), 120),
     });
 
-    const principal = await verifyAccessToken(authorization);
+    const verified = await verifyAccessToken(authorization);
     logMcp("mcp_token_verified", {
       request_id: requestId,
-      ok: Boolean(principal),
-      client_id: principal?.clientId ?? null,
-      grant_id: principal?.grantId ?? null,
-      has_connection: Boolean(principal?.connectionId),
-      onboarding: principal?.onboarding ?? null,
-      token_scopes: principal?.scopes ?? [],
+      ok: verified.ok,
+      failure_reason: verified.ok ? null : verified.reason,
+      client_id: verified.ok ? verified.principal.clientId : verified.clientId,
+      grant_id: verified.ok ? verified.principal.grantId : verified.grantId,
+      has_connection: verified.ok ? Boolean(verified.principal.connectionId) : false,
+      onboarding: verified.ok ? verified.principal.onboarding : null,
+      token_scopes: verified.ok ? verified.principal.scopes : [],
       ms: Date.now() - startedAt,
     });
 
-    if (!principal) {
+    if (!verified.ok) {
       logMcp("mcp_response_completed", {
         request_id: requestId,
         status: 401,
         streamed: false,
         completed: true,
         bytes: null,
-        reason: "invalid_token",
+        reason: verified.reason,
         ms: Date.now() - startedAt,
       });
       return c.json(
@@ -218,6 +219,7 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
         { "WWW-Authenticate": wwwAuthenticate },
       );
     }
+    const principal = verified.principal;
 
     logMcp("mcp_method_received", {
       request_id: requestId,

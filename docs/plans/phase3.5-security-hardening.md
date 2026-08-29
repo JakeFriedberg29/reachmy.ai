@@ -1,10 +1,11 @@
 # Phase 3.5 — Security Hardening & Repository Hygiene
 
 **Status:** Plan **approved** 2026-08-27. **Slices 1–5 complete** (including combined real-provider regression).
-**Slice 6a code complete;** real Claude/ChatGPT scope observations still required before Slice 6b.
-A **Slice 6a diagnostic addendum** (report-only MCP transport observability) is code complete and
-undeployed — added because ChatGPT hangs on "Working" for simple tool requests, which blocks the
-provider scope observations 6b depends on. Slices 6b–8 not started.
+**Slice 6a:** OAuth observability deployed; ChatGPT `initial_authorization` captured (decision 100);
+Claude `refresh` captured; Claude `initial_authorization` still outstanding. **Slice 6b blocked**
+(decisions 96, 102, 103) — do not start; the proposed tool→scope map would deny a live Claude
+`list_connections`. **Slice 6a diagnostic addendum** (MCP transport observability) deployed at
+`fdd09ee`. ChatGPT reconnect 401 is a stale `agent_connections.grant_id` (decision 105); fix implemented, not deployed. Slices 7–8 not started.
 **Gate:** Phase 3 is **complete** and stays complete. Phase 4 has **not** started.
 **Type:** Small stabilization phase. Not a feature phase. Not a refactor phase.
 
@@ -242,7 +243,7 @@ hygiene, per operator instruction.
 | 3 | Shared HTTP test harness | Low | — | **Complete** |
 | 4 | Explicit OAuth consent | **Medium–High** | 3 | **Complete (pending provider regression)** |
 | 5 | DCR policy + metadata validation | Medium | 4 | **Complete (pending provider regression)** |
-| 6a | Scope observability (report-only) | Low | 3 | **Code complete (pending real-provider scope observations)** |
+| 6a | Scope observability (report-only) | Low | 3 | **Deployed; ChatGPT observation captured; Claude `initial_authorization` still outstanding** |
 | 6b | Scope issuance + enforcement | **High** | 6a, 4 |
 | 7 | CI + lint + format + test discovery | Low–Medium | 3 |
 | 8 | Docs + repository hygiene | Low | all |
@@ -558,6 +559,47 @@ nothing.
 
 **Tests.** `tests/scope-observability.test.ts` (10). Suite moves from **171 to 181 pass**.
 
+#### Real-provider scope observations (captured 2026-08-28 from deployed `oauth_debug` logs)
+
+These are the first structured, provider-attributed scope records. They supersede the historical
+leads in decision 95.
+
+**ChatGPT — `scope_authorization_observed`, `flow_kind: initial_authorization`, `prompt_name: consent`,
+`client_name: ChatGPT`, `redirect_host: chatgpt.com`:**
+
+| Field | Value |
+|---|---|
+| `requested_scopes` | `openid`, `identity:read`, `interactions:write` |
+| `granted_oidc_scopes` | `openid`, `identity:read`, `interactions:write` (identical to requested) |
+| `granted_resource_scopes` | expanded to the full supported set |
+| `scope_expanded` | `true` |
+| resulting `scope_token_observed` | `openid`, `identity:read`, `interactions:write` |
+
+**Claude — `scope_token_observed`, `flow_kind: refresh`:** `identity:read`, `interactions:write`,
+`offline_access`.
+
+**Two conclusions follow, and both change Slice 6b.**
+
+First, **the access token carries the client's requested scopes, not the expanded resource scopes.**
+ChatGPT's grant was expanded to the full set (`scope_expanded: true`) yet its token contained exactly
+the three scopes it asked for. This contradicts §5's stated mechanism ("the resource scope is what
+lands in the token"). The over-grant is real at the grant level but is **not** what reaches the MCP
+boundary, so narrowing issuance is a smaller change than §5 assumed — and enforcement is a much
+larger one.
+
+Second, **the proposed tool→scope map would break real Claude traffic today.** A live
+`scope_mcp_would_deny` was emitted for `list_connections`, which the map requires `contacts:read` for,
+against a Claude token that does not carry `contacts:read`. Under Slice 6b as currently drafted that
+call would have failed in production. The map must be revised — or issuance widened to match it —
+before enforcement is switched on. This is exactly the compatibility risk §5 predicted, now measured
+rather than inferred.
+
+**Gate 96 status: partially satisfied.** The ChatGPT half is complete — a fresh
+`initial_authorization` with requested, granted, and token scopes recorded. The Claude half is not:
+we have only a `refresh` observation, not a `scope_authorization_observed` from a fresh Claude
+authorization. Obtaining it requires a new Claude authorization, which the operator has explicitly
+deferred; the Claude grant is not to be revoked.
+
 ---
 
 ### Slice 6a diagnostic addendum — MCP transport observability (report-only)
@@ -630,12 +672,19 @@ separate `pnpm dev` happened to occupy port 3000 and failed (after a ~110s JWKS 
 It now uses `withServerOnPublicUrlPort`, the helper added for the transport tests, which also waits for
 the shared port instead of failing when concurrent test files contend for it.
 
-**Deployment status.** Not deployed. Slice 6a's OAuth scope observability is live in production; this
-addendum is not.
+**Deployment status.** Deployed at `fdd09ee` (2026-08-28). Slice 6a OAuth observability and this
+MCP transport addendum are both live. The ChatGPT "Working" hang is still open; diagnosis now uses
+`mcp_debug`, not further OAuth troubleshooting (decision 104).
 
 ---
 
 ### Slice 6b — Scope issuance + enforcement
+
+**Blocked. Do not start.** Two findings from the 2026-08-28 observations must be resolved in the plan
+before any code: the tool→scope map denies a real Claude `list_connections` call (decision 102), and
+token scopes follow the client's request rather than the expanded resource grant (decision 101), which
+changes what "narrowing issuance" actually accomplishes. The Claude half of gate 96 is also still open
+(decision 103).
 
 **Objective.** Stop over-granting resource scopes. Enforce scopes at the MCP boundary.
 
@@ -802,9 +851,15 @@ not a security issue. Do not spend slice time on it.
 | 97 | **HTTP 200 on `/mcp` is not evidence of a completed exchange.** Legacy clients (Claude and ChatGPT) take the stateless legacy fallback, which returns `200` with `text/event-stream` headers before the tool runs — confirmed by the emitted event order in `tests/mcp-http-transport.test.ts`. Completion is proven by `mcp_response_completed` `completed:true` plus `mcp_http_done`, not by the status line in Railway Network Logs. |
 | 98 | **Slice 6a diagnostic addendum:** report-only MCP transport tracing on a separate `mcp_debug` stream (`mcp_request_received`, `mcp_token_verified`, `mcp_method_received`, `mcp_tool_call_started`, `mcp_tool_call_completed`, `mcp_response_started`, `mcp_response_completed`, `mcp_http_done`), correlated by `request_id`. Added to localize the ChatGPT "Working" hang, which also blocks collecting the Slice 6a provider scope observations. No authorization, transport, or protocol decision reads it; tool argument **values** are never logged. |
 | 99 | **Diagnostics do not authorize anything and must not be able to break a request.** `logMcp` swallows its own failures and `traceResponseBody` re-emits status, headers, and bytes unchanged. Any future observability follows the same rule. |
+| 100 | **ChatGPT scope observation captured (2026-08-28), satisfying the ChatGPT half of gate 96.** Fresh `initial_authorization` on the `consent` prompt from `client_name: ChatGPT` / `redirect_host: chatgpt.com` requested and was granted exactly `openid`, `identity:read`, `interactions:write`; resource scopes were expanded (`scope_expanded: true`); the issued token carried only those three scopes. |
+| 101 | **Token scopes track the client's *requested* scopes, not the expanded resource scopes — correcting §5.** ChatGPT's grant was expanded to the full supported set yet its token contained only its three requested scopes, and Claude's refresh token carried only `identity:read`, `interactions:write`, `offline_access`. The grant-level over-grant is real but does not reach the MCP boundary. Slice 6b's issuance change is therefore smaller than §5 assumed, and its enforcement change is larger. |
+| 102 | **The proposed tool→scope map would break real Claude traffic and must not be enforced as drafted.** A production `scope_mcp_would_deny` fired for `list_connections` (map requires `contacts:read`) against a live Claude token without `contacts:read`. Slice 6b must first reconcile the map with observed real tokens — by revising required scopes, widening what clients are asked to request, or both — and must not flip enforcement on the current mapping. |
+| 103 | **Gate 96 is only half met.** ChatGPT: complete. Claude: outstanding, because the only Claude record is a `refresh`, not a `scope_authorization_observed` from a fresh authorization. Capturing it requires a new Claude authorization; the existing Claude grant is **not** to be revoked to force one. |
+| 104 | **OAuth is not the cause of the ChatGPT "Working" hang.** The same export shows ChatGPT completing consent, authorization code, `/token 200`, and subsequent refreshes. Further diagnosis uses the deployed `mcp_debug` positive-path trace, not more OAuth troubleshooting. |
+| 105 | **ChatGPT reconnect grant-rebind (not Slice 6b).** A new OAuth Grant for an existing `oauth_client_id` was inserted as a second `agent_connections` row and hit `agent_connections_client_uidx`; `verifyAccessToken` swallowed that as `401 invalid_token`. `upsertGrantConnection` now rebinds a connected client row to the new grant, then deletes only the superseded Grant's `oauth_models` rows — never `revokeAgentConnection`, which would mark the live connection revoked. Revoked client rows stay rejected. If cleanup of Grant A fails and A remains valid, a later A token cannot steal the binding back from live newer Grant B (`iat` comparison; older or equal incoming is rejected before the update, so Grant B is never destroyed). Report-only `failure_reason` on `mcp_token_verified`: `invalid_token` \| `revoked_connection` \| `connection_conflict`. |
 
 ---
 
-*End of Phase 3.5 plan. Slices 1–5 complete (real-provider regression passed). Slice 6a code complete;
-real Claude/ChatGPT scope observations still required before Slice 6b. Slice 6a diagnostic addendum
-(MCP transport observability) code complete and not deployed; Slice 6b remains blocked.*
+*End of Phase 3.5 plan. Slices 1–5 complete (real-provider regression passed). Slice 6a OAuth
+observability deployed; ChatGPT `initial_authorization` captured; Claude `initial_authorization`
+still outstanding. Slice 6a diagnostic addendum deployed at `fdd09ee`. Slice 6b remains blocked.*

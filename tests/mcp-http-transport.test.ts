@@ -108,6 +108,7 @@ test("MCP transport: unauthenticated POST /mcp is refused with an OAuth challeng
 
     const verified = logs.find((entry) => entry.event === "mcp_token_verified");
     assert.equal(verified?.ok, false);
+    assert.equal(verified?.failure_reason, "invalid_token");
   });
 });
 

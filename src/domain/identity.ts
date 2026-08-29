@@ -4,6 +4,7 @@ import {
   accounts,
   agentConnections,
   handles,
+  oauthModels,
   principals,
 } from "../db/schema.js";
 import { conflict, DomainError, notFound, onboardingRequired, unauthorized } from "./errors.js";
@@ -287,6 +288,38 @@ export async function ensureApiConnection(db: Database | Tx, principalId: string
   return retry.id;
 }
 
+/**
+ * OAuth-model delete only. Must not be replaced with `revokeAgentConnection`, which marks the
+ * *connection* revoked before deleting grants — that would take down the row we just rebound.
+ */
+async function destroySupersededOauthGrant(db: Database | Tx, grantId: string): Promise<void> {
+  await db
+    .delete(oauthModels)
+    .where(or(eq(oauthModels.grantId, grantId), and(eq(oauthModels.model, "Grant"), eq(oauthModels.id, grantId))));
+}
+
+async function oauthGrantExists(db: Database | Tx, grantId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: oauthModels.id })
+    .from(oauthModels)
+    .where(and(eq(oauthModels.model, "Grant"), eq(oauthModels.id, grantId)))
+    .limit(1);
+  return Boolean(row);
+}
+
+/** oidc-provider always stores `iat`. `expiresAt` is a monotonic fallback for synthetic rows. */
+async function oauthGrantIssuedAt(db: Database | Tx, grantId: string): Promise<number> {
+  const [row] = await db
+    .select({ payload: oauthModels.payload, expiresAt: oauthModels.expiresAt })
+    .from(oauthModels)
+    .where(and(eq(oauthModels.model, "Grant"), eq(oauthModels.id, grantId)))
+    .limit(1);
+  if (!row) return 0;
+  if (typeof row.payload.iat === "number") return row.payload.iat;
+  if (row.expiresAt) return Math.floor(row.expiresAt.getTime() / 1000);
+  return 0;
+}
+
 export async function upsertGrantConnection(
   db: Database | Tx,
   input: {
@@ -316,6 +349,57 @@ export async function upsertGrantConnection(
       })
       .where(eq(agentConnections.id, byGrant.id));
     return byGrant.id;
+  }
+
+  if (input.oauthClientId) {
+    const [byClient] = await db
+      .select()
+      .from(agentConnections)
+      .where(
+        and(
+          eq(agentConnections.principalId, input.principalId),
+          eq(agentConnections.oauthClientId, input.oauthClientId),
+        ),
+      )
+      .limit(1);
+    if (byClient) {
+      if (byClient.status === "revoked") {
+        throw unauthorized("This AI connection has been revoked and can no longer represent this Agent Name");
+      }
+      const supersededGrantId = byClient.grantId;
+      // A leftover JWT — destroyed grant, or still-valid older grant after failed cleanup — must
+      // not steal the binding back from a live newer grant.
+      if (supersededGrantId && supersededGrantId !== input.grantId) {
+        const incomingLive = await oauthGrantExists(db, input.grantId);
+        const currentLive = await oauthGrantExists(db, supersededGrantId);
+        if (currentLive && !incomingLive) {
+          throw unauthorized("This AI connection has been revoked and can no longer represent this Agent Name");
+        }
+        if (currentLive && incomingLive) {
+          const incomingIat = await oauthGrantIssuedAt(db, input.grantId);
+          const currentIat = await oauthGrantIssuedAt(db, supersededGrantId);
+          if (incomingIat <= currentIat) {
+            throw unauthorized("This AI connection has been revoked and can no longer represent this Agent Name");
+          }
+        }
+      }
+      await db
+        .update(agentConnections)
+        .set({
+          grantId: input.grantId,
+          lastAuthorizedAt: new Date(),
+        })
+        .where(eq(agentConnections.id, byClient.id));
+      if (supersededGrantId && supersededGrantId !== input.grantId) {
+        try {
+          await destroySupersededOauthGrant(db, supersededGrantId);
+        } catch {
+          // Connection already points at Grant B. Leftover Grant A is a security debt, not an
+          // authorization failure.
+        }
+      }
+      return byClient.id;
+    }
   }
 
   const [primary] = await db

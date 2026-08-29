@@ -8,6 +8,7 @@ import {
   upsertGrantConnection,
 } from "../domain/identity.js";
 import { CONNECTION_REVOKED } from "../domain/connections.js";
+import { DomainError } from "../domain/errors.js";
 import { mcpResource } from "./oidc.js";
 import { parseScopeString } from "./scope-map.js";
 
@@ -24,16 +25,36 @@ export type VerifiedPrincipal = {
   scopes: string[];
 };
 
+/** Report-only. Never returned to the client; MCP still answers 401 invalid_token. */
+export type TokenVerifyFailureReason = "invalid_token" | "revoked_connection" | "connection_conflict";
+
+export type TokenVerification =
+  | { ok: true; principal: VerifiedPrincipal }
+  | {
+      ok: false;
+      reason: TokenVerifyFailureReason;
+      clientId: string | null;
+      grantId: string | null;
+    };
+
+function failed(
+  reason: TokenVerifyFailureReason,
+  clientId: string | null = null,
+  grantId: string | null = null,
+): TokenVerification {
+  return { ok: false, reason, clientId, grantId };
+}
+
 export function createTokenVerifier(config: AppConfig, db: Database) {
   const jwks = createRemoteJWKSet(new URL(`${config.publicUrl}/jwks`));
   const resource = mcpResource(config.publicUrl);
 
   return async function verifyAccessToken(
     authorization: string | undefined,
-  ): Promise<VerifiedPrincipal | null> {
-    if (!authorization?.startsWith("Bearer ")) return null;
+  ): Promise<TokenVerification> {
+    if (!authorization?.startsWith("Bearer ")) return failed("invalid_token");
     const token = authorization.slice("Bearer ".length).trim();
-    if (!token) return null;
+    if (!token) return failed("invalid_token");
 
     try {
       const { payload } = await jwtVerify(token, jwks, {
@@ -41,7 +62,7 @@ export function createTokenVerifier(config: AppConfig, db: Database) {
         audience: resource,
       });
       const accountId = typeof payload.sub === "string" ? payload.sub : null;
-      if (!accountId) return null;
+      if (!accountId) return failed("invalid_token");
       let identity = await getIdentityByAccountId(db, accountId);
       if (!identity.principal_id) {
         await ensureProvisionalPrincipal(db, accountId);
@@ -53,7 +74,9 @@ export function createTokenVerifier(config: AppConfig, db: Database) {
       let connectionId: string | null = null;
       if (grantId && identity.principal_id) {
         const existing = await findConnectionByGrant(db, identity.principal_id, grantId);
-        if (existing?.status === CONNECTION_REVOKED) return null;
+        if (existing?.status === CONNECTION_REVOKED) {
+          return failed("revoked_connection", clientId, grantId);
+        }
         try {
           connectionId = await upsertGrantConnection(db, {
             principalId: identity.principal_id,
@@ -61,23 +84,29 @@ export function createTokenVerifier(config: AppConfig, db: Database) {
             oauthClientId: clientId,
             displayLabel: "MCP",
           });
-        } catch {
-          return null;
+        } catch (error) {
+          if (error instanceof DomainError && error.code === "unauthorized") {
+            return failed("revoked_connection", clientId, grantId);
+          }
+          return failed("connection_conflict", clientId, grantId);
         }
       }
       return {
-        accountId,
-        principalId: identity.principal_id ?? "",
-        handle: identity.handle ?? "",
-        displayName: identity.display_name ?? "",
-        grantId,
-        clientId,
-        connectionId,
-        onboarding: identity.onboarding,
-        scopes,
+        ok: true,
+        principal: {
+          accountId,
+          principalId: identity.principal_id ?? "",
+          handle: identity.handle ?? "",
+          displayName: identity.display_name ?? "",
+          grantId,
+          clientId,
+          connectionId,
+          onboarding: identity.onboarding,
+          scopes,
+        },
       };
     } catch {
-      return null;
+      return failed("invalid_token");
     }
   };
 }

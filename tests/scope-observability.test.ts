@@ -228,13 +228,14 @@ test("scope observability: verify-token exposes scopes from JWT access token", a
 
     const db = await testDb();
     const verify = createTokenVerifier({ ...config, publicUrl: config.publicUrl }, db);
-    const principal = await verify(`Bearer ${accessToken}`);
-    assert.ok(principal);
-    assert.ok(principal!.scopes.length > 0);
-    assert.ok(principal!.scopes.includes("identity:read"));
+    const verified = await verify(`Bearer ${accessToken}`);
+    assert.equal(verified.ok, true);
+    if (!verified.ok) return;
+    assert.ok(verified.principal.scopes.length > 0);
+    assert.ok(verified.principal.scopes.includes("identity:read"));
 
     const payload = decodeJwt(accessToken as string);
-    assert.deepEqual(principal!.scopes, parseScopeString(typeof payload.scope === "string" ? payload.scope : null));
+    assert.deepEqual(verified.principal.scopes, parseScopeString(typeof payload.scope === "string" ? payload.scope : null));
   });
 });
 
