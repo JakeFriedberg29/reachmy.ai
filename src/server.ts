@@ -199,7 +199,6 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
       grant_id: verified.ok ? verified.principal.grantId : verified.grantId,
       has_connection: verified.ok ? Boolean(verified.principal.connectionId) : false,
       onboarding: verified.ok ? verified.principal.onboarding : null,
-      token_scopes: verified.ok ? verified.principal.scopes : [],
       ms: Date.now() - startedAt,
     });
 
@@ -236,7 +235,7 @@ export async function createHttpServer(config: AppConfig, db: Database, jwks: Si
       authInfo: {
         token: authorization?.slice("Bearer ".length) ?? "",
         clientId: principal.clientId ?? "oauth",
-        scopes: principal.scopes,
+        scopes: ["identity:read", "interactions:write", "offline_access"],
         extra: {
           account_id: principal.accountId,
           principal_id: principal.principalId,

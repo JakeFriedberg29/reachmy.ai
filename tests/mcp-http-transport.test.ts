@@ -9,12 +9,33 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setClerkBrowserSessionResolverForTests } from "../src/auth/browser-account.js";
 import { hostnameFromUrl, type AppConfig } from "../src/config.js";
-import { ALL_MCP_TOOLS } from "../src/auth/scope-map.js";
 import { httpRequest, withServerOnPublicUrlPort, type HttpResult } from "./helpers-http.js";
 import { obtainOAuthAccessToken } from "./helpers-oauth-token.js";
 import { makePrincipal, testDb } from "./helpers.js";
 
 const MCP_ACCEPT = "application/json, text/event-stream";
+
+const EXPECTED_MCP_TOOLS = [
+  "get_my_identity",
+  "get_identity",
+  "create_identity",
+  "resolve_identity",
+  "create_invite",
+  "accept_invite",
+  "list_connections",
+  "get_relationship_permissions",
+  "set_relationship_permissions",
+  "create_interaction",
+  "list_pending_interactions",
+  "get_interaction",
+  "respond_to_interaction",
+  "create_proposal",
+  "approve_proposal",
+  "reject_proposal",
+  "list_agent_connections",
+  "request_disconnect_agent",
+  "revoke_agent_connection",
+];
 
 type McpLog = Record<string, unknown>;
 
@@ -136,7 +157,7 @@ test("MCP transport: tools/list advertises every mapped tool", async () => {
     const [message] = readRpcMessages(res);
     const tools = (message!.result as { tools: Array<{ name: string }> }).tools;
     const names = tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, [...ALL_MCP_TOOLS].sort());
+    assert.deepEqual(names, [...EXPECTED_MCP_TOOLS].sort());
   });
 });
 

@@ -4,7 +4,7 @@ import { upsertAccountByClerkUser, upsertGrantConnection, getIdentityByAccountId
 import { getInteractionBundle } from "../src/domain/interactions.js";
 import { executeTool, type McpToolContext } from "../src/mcp/tools.js";
 import type { VerifiedPrincipal } from "../src/auth/verify-token.js";
-import { makeGrantPrincipal, suffix, testDb, FULL_OAUTH_SCOPES } from "./helpers.js";
+import { makeGrantPrincipal, suffix, testDb } from "./helpers.js";
 
 function ctx(db: Awaited<ReturnType<typeof testDb>>, principal: VerifiedPrincipal): McpToolContext {
   return { db, principal, publicUrl: "http://localhost:3000" };
@@ -54,7 +54,6 @@ test("MCP adapter: Agent Name claim and resolve", async () => {
     clientId: `onboard:${tag}`,
     connectionId: null,
     onboarding: "ONBOARDING_REQUIRED",
-    scopes: [...FULL_OAUTH_SCOPES],
   };
   await assert.rejects(() => call(db, principal, "create_invite"), /onboarding_required|Choose your Agent Name/);
   const created = await call(db, principal, "create_identity", {

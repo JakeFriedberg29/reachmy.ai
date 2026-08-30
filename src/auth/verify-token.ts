@@ -10,7 +10,6 @@ import {
 import { CONNECTION_REVOKED } from "../domain/connections.js";
 import { DomainError } from "../domain/errors.js";
 import { mcpResource } from "./oidc.js";
-import { parseScopeString } from "./scope-map.js";
 
 export type VerifiedPrincipal = {
   accountId: string;
@@ -21,8 +20,6 @@ export type VerifiedPrincipal = {
   clientId: string | null;
   connectionId: string | null;
   onboarding: "complete" | "ONBOARDING_REQUIRED";
-  /** OAuth scopes carried by the MCP access token (resource indicator scopes). */
-  scopes: string[];
 };
 
 /** Report-only. Never returned to the client; MCP still answers 401 invalid_token. */
@@ -70,7 +67,6 @@ export function createTokenVerifier(config: AppConfig, db: Database) {
       }
       const grantId = typeof payload.grant_id === "string" ? payload.grant_id : null;
       const clientId = typeof payload.client_id === "string" ? payload.client_id : null;
-      const scopes = parseScopeString(typeof payload.scope === "string" ? payload.scope : null);
       let connectionId: string | null = null;
       if (grantId && identity.principal_id) {
         const existing = await findConnectionByGrant(db, identity.principal_id, grantId);
@@ -102,7 +98,6 @@ export function createTokenVerifier(config: AppConfig, db: Database) {
           clientId,
           connectionId,
           onboarding: identity.onboarding,
-          scopes,
         },
       };
     } catch {

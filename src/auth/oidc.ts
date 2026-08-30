@@ -1,20 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import Provider, { errors, type AdapterConstructor } from "oidc-provider";
+import Provider, { type AdapterConstructor } from "oidc-provider";
 import { isProductionRuntime, type AppConfig } from "../config.js";
 import type { Database } from "../db/client.js";
 import type { SigningJwks } from "../db/jwks.js";
 import { ensureProvisionalPrincipal, getIdentityByAccountId } from "../domain/identity.js";
-import {
-  createRateLimiter,
-  devStaticClients,
-  DCR_RATE_LIMIT,
-  validateClientMetadata,
-} from "./dcr-policy.js";
-import {
-  buildScopeAuthorizationObservation,
-  logScopeAuthorization,
-  logScopeTokenIssuance,
-} from "./scope-observability.js";
+import { devStaticClients } from "./dcr-policy.js";
 
 export const SCOPES =
   "openid identity:read contacts:read contacts:write interactions:read interactions:write proposals:write approvals:write offline_access";
@@ -44,52 +34,12 @@ function cookieFlags(req: IncomingMessage) {
 }
 
 type Grant = InstanceType<Provider["Grant"]>;
-export type OidcInteraction = Awaited<ReturnType<Provider["interactionDetails"]>>;
-
-/**
- * What the user is shown before authorizing a client. Every field is descriptive: locked
- * principle 13 forbids client metadata from influencing any authorization decision.
- */
-export type ConsentSummary = {
-  clientId: string;
-  clientName: string | null;
-  redirectUri: string | null;
-  redirectHost: string | null;
-  scopes: string[];
-  resources: string[];
-};
+type OidcInteraction = Awaited<ReturnType<Provider["interactionDetails"]>>;
 
 function requestedResources(details: OidcInteraction): string[] {
   const resourceParam = details.params.resource;
   if (Array.isArray(resourceParam)) return resourceParam.map(String);
   return resourceParam ? [String(resourceParam)] : [];
-}
-
-export async function summarizeConsent(
-  provider: Provider,
-  details: OidcInteraction,
-): Promise<ConsentSummary> {
-  const clientId = String(details.params.client_id ?? "");
-  const client = clientId ? await provider.Client.find(clientId) : undefined;
-  const redirectUri =
-    typeof details.params.redirect_uri === "string" ? details.params.redirect_uri : null;
-  let redirectHost: string | null = null;
-  if (redirectUri) {
-    try {
-      redirectHost = new URL(redirectUri).host;
-    } catch {
-      redirectHost = null;
-    }
-  }
-  const scopeParam = typeof details.params.scope === "string" ? details.params.scope : "";
-  return {
-    clientId,
-    clientName: typeof client?.clientName === "string" ? client.clientName : null,
-    redirectUri,
-    redirectHost,
-    scopes: scopeParam.split(" ").filter(Boolean),
-    resources: requestedResources(details),
-  };
 }
 
 function applyRequestedGrant(grant: Grant, details: OidcInteraction, defaultResource: string): void {
@@ -145,7 +95,6 @@ export function createOidcProvider(
   const resource = mcpResource(config.publicUrl);
   const https = config.publicUrl.startsWith("https");
   const production = isProductionRuntime(config.publicUrl);
-  const registrationLimiter = createRateLimiter(DCR_RATE_LIMIT);
   const provider = new Provider(config.publicUrl, {
     adapter,
     jwks,
@@ -165,19 +114,6 @@ export function createOidcProvider(
       },
     },
     clients: devStaticClients(config.publicUrl, production, SCOPES),
-    // A property no client sends, used purely as a hook: oidc-provider passes the whole metadata
-    // object to the validator, which is what the redirect-URI and size rules need to see.
-    extraClientMetadata: {
-      properties: ["reachmy_client_policy"],
-      validator: (_ctx, key, _value, metadata) => {
-        delete (metadata as Record<string, unknown>)[key];
-        const problem = validateClientMetadata(metadata);
-        if (!problem) return;
-        throw problem.error === "invalid_redirect_uri"
-          ? new errors.InvalidRedirectUri(problem.description)
-          : new errors.InvalidClientMetadata(problem.description);
-      },
-    },
     pkce: {
       required: () => true,
     },
@@ -261,25 +197,6 @@ export function createOidcProvider(
 
   provider.proxy = true;
 
-  // Registration stays open, so the only cost control is volume. Answer over budget with an
-  // OAuth-shaped body rather than letting the request reach the adapter.
-  provider.use(async (ctx, next) => {
-    if (ctx.method === "POST" && ctx.path === "/reg") {
-      const key = ctx.ip || "unknown";
-      if (!registrationLimiter.allow(key)) {
-        logOauth("dcr_rate_limited", { ip: key });
-        ctx.status = 429;
-        ctx.set("retry-after", String(Math.ceil(DCR_RATE_LIMIT.windowMs / 1000)));
-        ctx.body = {
-          error: "temporarily_unavailable",
-          error_description: "Too many client registrations from this address. Try again later.",
-        };
-        return;
-      }
-    }
-    await next();
-  });
-
   // OAuth 2.1 clients may omit `scope`. oidc-provider then rejects the request with
   // access_denied ("no scope was granted") before consent runs, so default it here.
   provider.use(async (ctx, next) => {
@@ -325,24 +242,6 @@ export function createOidcProvider(
       application_type: client.applicationType,
       grant_types: client.grantTypes,
       token_endpoint_auth_method: client.tokenEndpointAuthMethod,
-    });
-  });
-
-  // Report-only: record scopes placed into issued access tokens (authorization code + refresh).
-  provider.use(async (ctx, next) => {
-    await next();
-    if (ctx.method !== "POST" || ctx.path !== "/token" || ctx.status !== 200) return;
-    const grantType = ctx.oidc?.params?.grant_type;
-    if (grantType !== "authorization_code" && grantType !== "refresh_token") return;
-    const accessToken = ctx.oidc?.entities?.AccessToken;
-    if (!accessToken) return;
-    logScopeTokenIssuance({
-      flow_kind: grantType === "refresh_token" ? "refresh" : "authorization_code",
-      client_id: String(accessToken.clientId ?? ""),
-      grant_id: typeof accessToken.grantId === "string" ? accessToken.grantId : null,
-      token_scopes: String(accessToken.scope ?? "")
-        .split(" ")
-        .filter(Boolean),
     });
   });
 
@@ -395,29 +294,7 @@ export async function completeOauthInteraction(
   } else {
     grant = new provider.Grant({ accountId, clientId });
   }
-  const defaultResource = mcpResource(config.publicUrl);
-  const resources = requestedResources(details);
-  if (!resources.includes(defaultResource)) resources.push(defaultResource);
-  applyRequestedGrant(grant, details, defaultResource);
-
-  let redirectHost: string | null = null;
-  if (redirectUri) {
-    try {
-      redirectHost = new URL(redirectUri).host;
-    } catch {
-      redirectHost = null;
-    }
-  }
-  logScopeAuthorization(
-    buildScopeAuthorizationObservation({
-      details,
-      grant,
-      clientName: typeof client?.clientName === "string" ? client.clientName : null,
-      redirectHost,
-      resourceIndicators: resources,
-    }),
-  );
-
+  applyRequestedGrant(grant, details, mcpResource(config.publicUrl));
   const savedGrantId = await grant.save();
 
   const result: {
@@ -452,34 +329,4 @@ export async function completeOauthInteraction(
   await provider.interactionFinished(req, res, result, {
     mergeWithLastSubmission: true,
   });
-}
-
-export async function denyOauthInteraction(
-  provider: Provider,
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> {
-  const details = await provider.interactionDetails(req, res);
-  const redirectUri =
-    typeof details.params.redirect_uri === "string" ? details.params.redirect_uri : null;
-
-  logOauth("consent_denied", {
-    uid: details.uid,
-    prompt: details.prompt.name,
-    client_id: details.params.client_id ?? null,
-    redirect_uri: redirectUri,
-    resume_url: details.returnTo,
-  });
-
-  attachRedirectLogger(res, { uid: details.uid, prompt: details.prompt.name, redirect_uri: redirectUri });
-
-  await provider.interactionFinished(
-    req,
-    res,
-    {
-      error: "access_denied",
-      error_description: "The user denied this authorization request.",
-    },
-    { mergeWithLastSubmission: false },
-  );
 }

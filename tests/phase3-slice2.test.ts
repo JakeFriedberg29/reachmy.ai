@@ -182,7 +182,6 @@ test("Slice 2H: MCP create_identity claims provisional principal", async () => {
     clientId: grantId,
     connectionId: null,
     onboarding: "ONBOARDING_REQUIRED",
-    scopes: [],
   };
   const created = await mcpCall(db, principal, "create_identity", {
     agent_name: `@${handle}`,
