@@ -2,10 +2,12 @@
 
 **Status:** Plan **approved** 2026-08-27. **Slices 1–5 complete** (including combined real-provider regression).
 **Slice 6a:** OAuth observability deployed; ChatGPT `initial_authorization` captured (decision 100);
-Claude `refresh` captured; Claude `initial_authorization` still outstanding. **Slice 6b blocked**
-(decisions 96, 102, 103) — do not start; the proposed tool→scope map would deny a live Claude
-`list_connections`. **Slice 6a diagnostic addendum** (MCP transport observability) deployed at
-`fdd09ee`. ChatGPT reconnect 401 is a stale `agent_connections.grant_id` (decision 105); fix implemented, not deployed. Slices 7–8 not started.
+Claude `refresh` captured; Claude `initial_authorization` still outstanding. **Slice 6b remains
+BLOCKED and is not complete** (decisions 96, 102, 103, 106–113). A local prototype demonstrated
+centralized MCP scope enforcement; the proposed production mapping was **rejected**. Do not ship,
+merge, or deploy 6b. Prototype parked at `prototype/phase3.5-slice6b-scope-enforcement`. **Slice 6a
+diagnostic addendum** (MCP transport observability) deployed at `fdd09ee`. ChatGPT reconnect
+grant-rebind is on production `cf7b84a` (decision 105). Slices 7–8 not started.
 **Gate:** Phase 3 is **complete** and stays complete. Phase 4 has **not** started.
 **Type:** Small stabilization phase. Not a feature phase. Not a refactor phase.
 
@@ -244,7 +246,7 @@ hygiene, per operator instruction.
 | 4 | Explicit OAuth consent | **Medium–High** | 3 | **Complete (pending provider regression)** |
 | 5 | DCR policy + metadata validation | Medium | 4 | **Complete (pending provider regression)** |
 | 6a | Scope observability (report-only) | Low | 3 | **Deployed; ChatGPT observation captured; Claude `initial_authorization` still outstanding** |
-| 6b | Scope issuance + enforcement | **High** | 6a, 4 |
+| 6b | Scope issuance + enforcement | **High** | 6a, 4 | **Blocked — prototype only; mapping rejected (decisions 106–113)** |
 | 7 | CI + lint + format + test discovery | Low–Medium | 3 |
 | 8 | Docs + repository hygiene | Low | all |
 
@@ -680,37 +682,37 @@ MCP transport addendum are both live. The ChatGPT "Working" hang is still open; 
 
 ### Slice 6b — Scope issuance + enforcement
 
-**Blocked. Do not start.** Two findings from the 2026-08-28 observations must be resolved in the plan
-before any code: the tool→scope map denies a real Claude `list_connections` call (decision 102), and
-token scopes follow the client's request rather than the expanded resource grant (decision 101), which
-changes what "narrowing issuance" actually accomplishes. The Claude half of gate 96 is also still open
-(decision 103).
+**Blocked. Not complete. Do not ship.** A 2026-08-30 prototype demonstrated centralized MCP tool
+boundary enforcement (fail closed, `insufficient_scope`, denial before domain execution). The
+proposed production mapping is **rejected** (decision 106).
 
-**Objective.** Stop over-granting resource scopes. Enforce scopes at the MCP boundary.
+Real Claude/ChatGPT tokens currently expose only the practical resource capabilities `identity:read`
+and `interactions:write` (plus protocol `openid` / `offline_access`). Mapping broad write authority
+onto `identity:read` would make Slice 4 consent misleading and is not acceptable. Treating
+`interactions:write` as an end-to-end coordination bundle is more defensible, but it still does not
+match the advertised fine-grained taxonomy (`contacts:*`, `interactions:read`, `proposals:write`,
+`approvals:write`). Fine-grained enforcement cannot safely ship until real clients can genuinely
+request and obtain those scopes. Silently expanding requested scopes remains forbidden.
 
-**Approach.** Fix `src/auth/oidc.ts:70` to grant requested/intersected resource scopes rather than
-the full set. Narrow the `scope_defaulted` middleware (`:209-215`) from "everything" to a minimal
-baseline. Add `identity:write`. Flip the report-only check to enforcing.
+`offline_access` and `openid` remain protocol scopes and never authorize MCP tools.
 
-**Compatibility.** Existing production grants already carry full resource scope and continue to
-work. The risk is **new** grants for clients that request narrowly — which Phase 2 observed for
-ChatGPT. Slice 6a data determines the safe baseline.
+**Still blocked on:**
+- a coherent final scope model (honest fine-grained issuance, or honestly named coarse bundles)
+- working ChatGPT live validation (connector/auth is not a reliable 6b regression client)
+- fresh Claude `scope_authorization_observed` `initial_authorization` evidence (gate 96 / decision 103)
 
-**Files.** `src/auth/oidc.ts`, `src/mcp/tools.ts`, `src/mcp/server.ts`.
+Prototype (not for production): local branch `prototype/phase3.5-slice6b-scope-enforcement`. Do not
+merge or push it to `main` unless explicitly requested.
 
-**Acceptance.**
-- Token scope reflects what was requested and authorized, not the full set
-- Tool call without the required scope → clean OAuth-shaped error, not a 500
-- Pre-existing full-scope grants still work
-- Domain authorization unchanged and still authoritative
-- Claude and ChatGPT both complete a full lifecycle: identity → invite → coordinate → propose →
-  approve → `AGREED`
+**Objective (unchanged, unmet).** Stop over-granting resource scopes. Enforce a semantically honest
+scope model at the MCP boundary.
 
-**Tests.** Token carries only requested scopes; each tool denied without its scope and allowed with
-it; legacy full-scope grant regression test.
+**Acceptance (unchanged, unmet).** Token/grant scopes match what was requested; tools fail closed
+without the required scope; domain authorization remains authoritative; Claude and ChatGPT still
+complete a full lifecycle. Plus: consent-screen scope names must match actual authority.
 
-**Manual validation.** **Required, and the most important in the phase.** Full real-provider
-regression on both Claude and ChatGPT. Have a rollback plan ready.
+**Manual validation.** Still required before any future 6b ship: live Claude and ChatGPT regression.
+Do not use the current connections to force Claude re-authorization.
 
 ---
 
@@ -857,9 +859,18 @@ not a security issue. Do not spend slice time on it.
 | 103 | **Gate 96 is only half met.** ChatGPT: complete. Claude: outstanding, because the only Claude record is a `refresh`, not a `scope_authorization_observed` from a fresh authorization. Capturing it requires a new Claude authorization; the existing Claude grant is **not** to be revoked to force one. |
 | 104 | **OAuth is not the cause of the ChatGPT "Working" hang.** The same export shows ChatGPT completing consent, authorization code, `/token 200`, and subsequent refreshes. Further diagnosis uses the deployed `mcp_debug` positive-path trace, not more OAuth troubleshooting. |
 | 105 | **ChatGPT reconnect grant-rebind (not Slice 6b).** A new OAuth Grant for an existing `oauth_client_id` was inserted as a second `agent_connections` row and hit `agent_connections_client_uidx`; `verifyAccessToken` swallowed that as `401 invalid_token`. `upsertGrantConnection` now rebinds a connected client row to the new grant, then deletes only the superseded Grant's `oauth_models` rows — never `revokeAgentConnection`, which would mark the live connection revoked. Revoked client rows stay rejected. If cleanup of Grant A fails and A remains valid, a later A token cannot steal the binding back from live newer Grant B (`iat` comparison; older or equal incoming is rejected before the update, so Grant B is never destroyed). Report-only `failure_reason` on `mcp_token_verified`: `invalid_token` \| `revoked_connection` \| `connection_conflict`. |
+| 106 | **Slice 6b is not complete.** A prototype demonstrated centralized MCP scope enforcement (check at `dispatchTool` before domain work; `insufficient_scope`; `scope_mcp_denied`). The proposed production tool→scope mapping is **rejected**. 6b remains blocked. |
+| 107 | **Practical resource capabilities on real tokens are only `identity:read` and `interactions:write`.** ChatGPT `initial_authorization` (decision 100): `openid`, `identity:read`, `interactions:write`. Claude refresh: `identity:read`, `interactions:write`, `offline_access`. Fine-grained names in `scopes_supported` are not what these clients obtain. |
+| 108 | **Do not map write authority onto `identity:read`.** That would authorize `create_identity`, invites, `set_relationship_permissions`, and `revoke_agent_connection` / `request_disconnect_agent` under a name that Slice 4 shows to the user as a read. Misleading consent is not acceptable. Domain/principal checks are not an OAuth capability split. |
+| 109 | **`interactions:write` as an end-to-end coordination bundle is more defensible** than `identity:read`-for-writes, but it still does not match the advertised taxonomy (`interactions:read`, `proposals:write`, `approvals:write`). |
+| 110 | **Fine-grained enforcement cannot safely ship until real clients can genuinely request/obtain those scopes.** Expanding `WWW-Authenticate` might change new Claude requests; ChatGPT already diverges from the hint and is not a reliable live 6b client. Silently expanding requested scopes remains forbidden (decision 101). |
+| 111 | **`openid` and `offline_access` are protocol scopes and never authorize MCP tools.** |
+| 112 | **Slice 6b remains blocked on:** (1) a coherent final scope model, (2) working ChatGPT live validation, (3) fresh Claude `initial_authorization` evidence (gate 96 / decision 103). Do not revoke the live Claude grant to force (3). |
+| 113 | **6b prototype is parked, not shipped.** Durable local branch `prototype/phase3.5-slice6b-scope-enforcement`. Do not merge or push it to production/`main` unless explicitly requested. Keep Slice 6a observability in production. |
 
 ---
 
 *End of Phase 3.5 plan. Slices 1–5 complete (real-provider regression passed). Slice 6a OAuth
 observability deployed; ChatGPT `initial_authorization` captured; Claude `initial_authorization`
-still outstanding. Slice 6a diagnostic addendum deployed at `fdd09ee`. Slice 6b remains blocked.*
+still outstanding. Slice 6a diagnostic addendum deployed at `fdd09ee`. Slice 6b remains blocked
+(prototype only; production mapping rejected). Slices 7–8 not started.*
