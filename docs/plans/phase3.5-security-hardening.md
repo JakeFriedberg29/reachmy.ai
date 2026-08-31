@@ -7,7 +7,9 @@ BLOCKED and is not complete** (decisions 96, 102, 103, 106–113). A local proto
 centralized MCP scope enforcement; the proposed production mapping was **rejected**. Do not ship,
 merge, or deploy 6b. Prototype parked at `prototype/phase3.5-slice6b-scope-enforcement`. **Slice 6a
 diagnostic addendum** (MCP transport observability) deployed at `fdd09ee`. ChatGPT reconnect
-grant-rebind is on production `cf7b84a` (decision 105). Slices 7–8 not started.
+grant-rebind remains in production (decision 105; still present after Slice 7
+merge `5071c89`). **Slice 7 complete** (merged `5071c89`, Railway `20b54dd7`).
+Slice 8 not started.
 **Gate:** Phase 3 is **complete** and stays complete. Phase 4 has **not** started.
 **Type:** Small stabilization phase. Not a feature phase. Not a refactor phase.
 
@@ -749,6 +751,12 @@ additions.
 
 **Manual validation.** None.
 
+**Status.** Complete 2026-08-30. Merged to `main` as `5071c89` (PR #1). GitHub Actions
+on `main` (`33346182862`) passed both tiers: no-secret unit job and integration
+(`pnpm test` 198, `pnpm smoke:portal`). Railway production deploy `20b54dd7` is
+that SHA. Grant-rebind from `cf7b84a` remains. Slice 6b prototype and the
+diagnostic rollback branch were not merged.
+
 ---
 
 ### Slice 8 — Documentation and repository hygiene
@@ -785,7 +793,7 @@ Phase 3.5 is complete only when all of the following hold:
 - [ ] OAuth consent behavior is explicit and safe
 - [ ] DCR behavior explicitly understood, documented, and safely supported
 - [ ] OAuth scopes correctly issued and enforced
-- [ ] CI / lint / format / test gates exist and pass
+- [x] CI / lint / format / test gates exist and pass
 - [ ] Duplicated HTTP test infrastructure meaningfully reduced
 - [ ] Active docs and repo artifacts cleaned up
 - [ ] Phase 3 functionality intact
@@ -873,6 +881,7 @@ not a security issue. Do not spend slice time on it.
 | 112 | **Slice 6b remains blocked on:** (1) a coherent final scope model, (2) working ChatGPT live validation, (3) fresh Claude `initial_authorization` evidence (gate 96 / decision 103). Do not revoke the live Claude grant to force (3). |
 | 113 | **6b prototype is parked, not shipped.** Durable local branch `prototype/phase3.5-slice6b-scope-enforcement`. Do not merge or push it to production/`main` unless explicitly requested. Keep Slice 6a observability in production. |
 | 114 | **Selective pre-Phase-3.5 rollback did not restore ChatGPT.** A diagnostic build on `diagnostic/chatgpt-pre-phase3.5` (`fb6ea26`, Railway `cea6a189`) restored pre-Phase-3.5 consent/DCR/scope behavior while keeping grant-rebind, redirect hardening, production `COOKIE_KEYS`, subject-mismatch protection, and production hiding of `phase-minus1-cli` / `/dev/callback`. Tested 2026-08-30: ChatGPT recognized `@reachmy.ai` but exposed no callable tools. ReachMy received zero ChatGPT traffic (`no /reg`, `/auth`, `/token`, `/mcp`, `oauth_debug`, `mcp_debug`, or `openai-mcp` user-agent). Slices 4, 5, and 6a are ruled out as the cause of the current ChatGPT connector-loading failure. The failure is upstream of ReachMy MCP/OAuth invocation. No further ReachMy rollback is warranted for this symptom. Production was restored to `origin/main` `@ cf7b84a` (Railway `efcbe351`). The diagnostic branch is preserved as evidence; it was not merged. |
+| 115 | **Slice 7 complete.** Merged to `main` as `5071c89` (PR #1, 2026-08-30). Actions on `main` passed (`33346182862`): frozen-lockfile install, typecheck, lint, incremental format, `test:unit`, full `pnpm test` (198), and `pnpm smoke:portal` against `DATABASE_URL_DEV`. Railway `20b54dd7` deployed that SHA. Production still contains `cf7b84a` grant-rebind. Slice 6b prototype and `diagnostic/chatgpt-pre-phase3.5` were not merged. Slice 8 not started. |
 
 ---
 
@@ -880,4 +889,5 @@ not a security issue. Do not spend slice time on it.
 observability deployed; ChatGPT `initial_authorization` captured; Claude `initial_authorization`
 still outstanding. Slice 6a diagnostic addendum deployed at `fdd09ee`. Slice 6b remains blocked
 (prototype only; production mapping rejected). A 2026-08-30 selective rollback of Slices 4/5/6a
-did not restore ChatGPT (decision 114); production remains `cf7b84a`. Slices 7–8 not started.*
+did not restore ChatGPT (decision 114). Slice 7 complete at `5071c89` (decision 115).
+Slice 8 not started.*
