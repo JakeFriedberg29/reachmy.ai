@@ -5,7 +5,7 @@
 **MCP resource:** `https://mcp.reachmy.ai/mcp`  
 **Portal host:** `https://app.reachmy.ai`  
 **Report:** this file  
-**Gate:** Phase 3 remains **complete**. Phase 3.5 is **current** and **not fully closed**. Phase 4 has **not** started.
+**Gate:** Phase 3 remains **complete**. Phase 3.5 is **OPEN** pending Slice 6b resolution. Phase 4 has **not** started.
 
 This is a current-state record after Slice 8 hygiene. It does **not** close Phase 3.5.
 
@@ -23,22 +23,25 @@ Plan: [`docs/plans/phase3.5-security-hardening.md`](plans/phase3.5-security-hard
 | 4 | Explicit OAuth consent | **Complete** (real-provider regression passed with Slice 5) |
 | 5 | DCR policy + client metadata validation | **Complete** (real-provider regression passed with Slice 4) |
 | 6a | Scope observability (report-only) + MCP transport diagnostics | **Complete** / deployed. ChatGPT `initial_authorization` captured; Claude `initial_authorization` still outstanding |
-| 6b | Scope issuance + enforcement | **BLOCKED — not shipped.** Prototype only; production mapping rejected. Branch `prototype/phase3.5-slice6b-scope-enforcement` must not be merged |
+| 6b | Scope issuance + enforcement | **BLOCKED / NOT SHIPPED.** Prototype only; production mapping rejected. Branch `prototype/phase3.5-slice6b-scope-enforcement` must not be merged |
 | 7 | CI / lint / format / test discovery | **Complete** (merged `5071c89`, PR #1) |
-| 8 | Documentation and repository hygiene | **Complete** (this record) |
+| 8 | Documentation and repository hygiene | **COMPLETE** (merged `737684f`, PR #2) |
 
 ---
 
-## Production main and health (verified 2026-08-30)
+## Production main and health (verified 2026-08-30 after PR #2)
 
 | Item | Value |
 |---|---|
-| Local `main` / `origin/main` | `2f15f7ba59420a3a8cbef7630ffbcaf3d904109a` |
-| Railway production SHA | `2f15f7b` (deploy `8a55ddff`, SUCCESS, Online) |
+| Local `main` / `origin/main` | `737684f736d3fe906bbc5e35fb490745eb75da3b` |
+| Railway production SHA | `737684f` (deploy `c6087343`, SUCCESS, Online) |
 | `GET https://mcp.reachmy.ai/health` | **200** (`ok: true`, issuer `https://mcp.reachmy.ai`) |
-| `GET https://app.reachmy.ai/health` | **200** (`ok: true`, `surface: portal`) |
+| Authorization-server discovery | **200** |
+| Protected-resource discovery | **200** |
+| `GET /jwks` | **200** |
+| Portal smoke | **pass** (10/10) |
 
-`2f15f7b` is the Slice 7 docs-only follow-up (Decision 115). The Slice 7 application SHA remains `5071c89`. No runtime change was made to force SHA alignment.
+Slice 8 merged as `737684f` (PR #2). CI run `33347888054` passed both tiers. No runtime change was made to force SHA alignment.
 
 Grant-rebind from `cf7b84a` (decision 105) **remains present** on production `main`.
 

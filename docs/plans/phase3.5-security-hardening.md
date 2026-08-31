@@ -9,8 +9,8 @@ merge, or deploy 6b. Prototype parked at `prototype/phase3.5-slice6b-scope-enfor
 diagnostic addendum** (MCP transport observability) deployed at `fdd09ee`. ChatGPT reconnect
 grant-rebind remains in production (decision 105; still present after Slice 7
 merge `5071c89`). **Slice 7 complete** (merged `5071c89`, Railway `20b54dd7`).
-**Slice 8 complete** (hygiene + [`docs/phase3.5-validation.md`](../phase3.5-validation.md)).
-Phase 3.5 is **not fully closed**.
+**Slice 8 COMPLETE** (merged `737684f`, PR #2, Railway `c6087343`).
+Phase 3.5 is **OPEN** pending Slice 6b resolution.
 **Gate:** Phase 3 is **complete** and stays complete. Phase 4 has **not** started.
 **Type:** Small stabilization phase. Not a feature phase. Not a refactor phase.
 
@@ -891,6 +891,7 @@ not a security issue. Do not spend slice time on it.
 | 114 | **Selective pre-Phase-3.5 rollback did not restore ChatGPT.** A diagnostic build on `diagnostic/chatgpt-pre-phase3.5` (`fb6ea26`, Railway `cea6a189`) restored pre-Phase-3.5 consent/DCR/scope behavior while keeping grant-rebind, redirect hardening, production `COOKIE_KEYS`, subject-mismatch protection, and production hiding of `phase-minus1-cli` / `/dev/callback`. Tested 2026-08-30: ChatGPT recognized `@reachmy.ai` but exposed no callable tools. ReachMy received zero ChatGPT traffic (`no /reg`, `/auth`, `/token`, `/mcp`, `oauth_debug`, `mcp_debug`, or `openai-mcp` user-agent). Slices 4, 5, and 6a are ruled out as the cause of the current ChatGPT connector-loading failure. The failure is upstream of ReachMy MCP/OAuth invocation. No further ReachMy rollback is warranted for this symptom. Production was restored to `origin/main` `@ cf7b84a` (Railway `efcbe351`). The diagnostic branch is preserved as evidence; it was not merged. |
 | 115 | **Slice 7 complete.** Merged to `main` as `5071c89` (PR #1, 2026-08-30). Actions on `main` passed (`33346182862`): frozen-lockfile install, typecheck, lint, incremental format, `test:unit`, full `pnpm test` (198), and `pnpm smoke:portal` against `DATABASE_URL_DEV`. Railway `20b54dd7` deployed that SHA. Production still contains `cf7b84a` grant-rebind. Slice 6b prototype and `diagnostic/chatgpt-pre-phase3.5` were not merged. Slice 8 not started. |
 | 116 | **Slice 8 complete (hygiene only).** Deleted untracked `scripts/remap-clerk-production-ids.sql` (never committed; Jake cutover already executed; Margot deferred). Archived and sanitized `scripts/archive/jake-clerk-production-cutover.sql`. Placeholder-ized `scripts/inspect-production-identities.sql` without changing `src/config.ts` production DB guards. Reconciled active docs; wrote [`docs/phase3.5-validation.md`](../phase3.5-validation.md). No OAuth / DCR / consent / scope / grant-rebind / observability / health-JSON changes. Phase 3.5 is **not fully closed**. Slice 6b remains blocked. Phase 4 has not started. |
+| 117 | **Slice 8 merged.** `737684f` (PR #2, 2026-08-30). Actions `33347888054` passed both tiers. Railway `c6087343` deployed that SHA. **Slice 8 COMPLETE.** **Slice 6b BLOCKED / NOT SHIPPED.** Phase 3.5 remains **OPEN** pending 6b resolution. Phase 4 has **not** started. |
 
 ---
 
@@ -899,4 +900,4 @@ observability deployed; ChatGPT `initial_authorization` captured; Claude `initia
 still outstanding. Slice 6a diagnostic addendum deployed at `fdd09ee`. Slice 6b remains blocked
 (prototype only; production mapping rejected). A 2026-08-30 selective rollback of Slices 4/5/6a
 did not restore ChatGPT (decision 114). Slice 7 complete at `5071c89` (decision 115).
-Slice 8 complete (decision 116). Phase 3.5 is not fully closed.*
+Slice 8 COMPLETE at `737684f` (decision 117). Phase 3.5 is OPEN pending 6b. Phase 4 has not started.*

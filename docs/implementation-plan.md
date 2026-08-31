@@ -7,7 +7,7 @@
 | Phase | Status |
 |---|---|
 | -1, 0, 1, 2, 3 | **Complete** — reports: [`phase-minus1-validation.md`](phase-minus1-validation.md), [`phase2-validation.md`](phase2-validation.md), [`phase3-validation.md`](phase3-validation.md) |
-| **3.5** | **Current** — security hardening & repository hygiene. Plan: [`docs/plans/phase3.5-security-hardening.md`](plans/phase3.5-security-hardening.md). Current-state record: [`docs/phase3.5-validation.md`](phase3.5-validation.md). **Slice 6b remains BLOCKED.** Phase 3.5 is **not fully closed**. |
+| **3.5** | **OPEN** pending Slice 6b. Slices 1–5, 6a, 7, 8 complete; **Slice 6b BLOCKED / NOT SHIPPED.** Plan: [`docs/plans/phase3.5-security-hardening.md`](plans/phase3.5-security-hardening.md). Record: [`docs/phase3.5-validation.md`](phase3.5-validation.md). |
 | 4 | **Not started** — headless conversational UX (§6) |
 
 Shipped schema, OAuth issuer/resource, domain services, and MCP tools remain as implemented unless a later approved phase changes them. This document does not reopen Phase 0/1 architecture.
@@ -354,7 +354,7 @@ Same Railway service, same Neon, same domain services. Framer stays on `reachmy.
 
 **Exit criteria:** See Phase 3.5 plan §8. Claude and ChatGPT must still connect and operate.
 
-**Status:** **Current — not fully closed.** Slices 1–5 complete (real-provider regression passed). Slice 6a OAuth observability deployed; ChatGPT `initial_authorization` captured; Claude `initial_authorization` still outstanding. **Slice 6b remains BLOCKED** (prototype only; production mapping rejected). Slice 7 complete. Slice 8 hygiene recorded in [`docs/phase3.5-validation.md`](phase3.5-validation.md). Phase 4 has **not** started.
+**Status:** **OPEN** pending Slice 6b. Slices 1–5, 6a, 7, and 8 complete. **Slice 6b remains BLOCKED / NOT SHIPPED.** Phase 4 has **not** started. Record: [`docs/phase3.5-validation.md`](phase3.5-validation.md).
 
 #### Phase 4 — Headless conversational UX
 
