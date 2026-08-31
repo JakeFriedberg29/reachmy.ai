@@ -10,7 +10,7 @@ Product term: **ReachMy Portal** (`app.reachmy.ai`). Do not use “Control Cente
 |---|---|---|
 | Phase 3 Portal direction notes | [`phase3-portal-notes.md`](phase3-portal-notes.md) | Historical direction. Formal plan was written afterward; Phase 3 is complete. |
 | Phase 3 Portal (detailed) | [`phase3-portal.md`](phase3-portal.md) | Approved (amended 2026-08-20). Phase 3 complete. |
-| Phase 3.5 security hardening | [`phase3.5-security-hardening.md`](phase3.5-security-hardening.md) | **Current.** Slices 1–5, 6a, 7, 8 done; **Slice 6b BLOCKED**. Phase 3.5 is not fully closed. |
+| Phase 3.5 security hardening | [`phase3.5-security-hardening.md`](phase3.5-security-hardening.md) | **OPEN** pending 6b. Slices 1–5, 6a, 7, 8 complete; **Slice 6b BLOCKED / NOT SHIPPED**. |
 
 ## Planned but not yet written
 
