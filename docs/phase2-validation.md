@@ -6,6 +6,8 @@
 **Report:** this file  
 **Gate:** Phase 2 closed. Phase 3 not started.
 
+**Later (historical closing note):** Phase 2 was subsequently followed by Phase 3 (complete; see [`docs/phase3-validation.md`](phase3-validation.md)). This report is unchanged as the Phase 2 record. Phase 3.5 is now current; Phase 4 has not started.
+
 ---
 
 ## Summary

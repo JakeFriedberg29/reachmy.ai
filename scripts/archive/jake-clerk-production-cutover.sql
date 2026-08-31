@@ -1,24 +1,30 @@
--- Jake-only Clerk Development → Production identity remap (production Neon).
--- STATUS: Executed successfully 2026-08-28. Railway Production Clerk keys live.
--- Remap + orphan cleanup validated — see docs/phase3-validation.md.
--- DO NOT re-run Section B unless performing a controlled rollback (Section C).
+-- HISTORICAL ARCHIVE — DO NOT RUN.
 --
--- Margot (@margot_botberg) is OUT OF SCOPE — do not modify her rows.
+-- This file is a sanitized copy of the Jake-only Clerk Development → Production
+-- identity remap that was executed on production Neon on 2026-08-28.
 --
--- Coordinated cutover requires IMMEDIATELY after COMMIT:
+-- STATUS: Already executed. Railway Production Clerk keys were switched to
+-- pk_live_ / sk_live_ after COMMIT. Remap + orphan cleanup were validated —
+-- see docs/phase3-validation.md.
+--
+-- DO NOT re-run any section. The live UPDATE / COMMIT path is retained only
+-- so the operation remains understandable. Production-specific Clerk user IDs
+-- and email addresses have been replaced with placeholders. A second named
+-- Agent Name was recorded as out of scope and was not modified.
+--
+-- If another Clerk cutover is needed later, write a new generic parameterized
+-- runbook. Do not fill these placeholders and execute this file.
+--
+-- Coordinated cutover (already done) required immediately after COMMIT:
 --   Railway CLERK_PUBLISHABLE_KEY → pk_live_...
 --   Railway CLERK_SECRET_KEY      → sk_live_...
 --   Redeploy same ReachMy service
---
--- IDs (confirm exact Dev string in preflight — Clerk subs are usually user_…):
---   Dev:  user_3I4GEMsFuxECI5ZDo0o7dAgvbuV   (verify in Neon preflight)
---   Prod: user_3IWJr7h5jpvnmAs8DA3BJmnjAF1
 
 -- =============================================================================
--- A. READ-ONLY PREFLIGHT (run first; all must pass before remap)
+-- A. READ-ONLY PREFLIGHT (historical — already satisfied)
 -- =============================================================================
 
--- A1) Jake account binding — capture baseline (save this output)
+-- A1) Cutover account binding — capture baseline (save this output)
 SELECT
   h.handle AS agent_handle,
   a.id AS account_id,
@@ -48,38 +54,38 @@ SELECT
 FROM handles h
 JOIN principals p ON p.id = h.principal_id
 JOIN accounts a ON a.id = p.account_id
-WHERE h.handle = 'jakebotberg';
+WHERE h.handle = 'CUTOVER_AGENT_HANDLE';
 
--- A2) Must return exactly one row for jakebotberg
+-- A2) Must return exactly one row for the cutover handle
 SELECT h.handle, count(DISTINCT a.id) AS account_count
 FROM handles h
 JOIN principals p ON p.id = h.principal_id
 JOIN accounts a ON a.id = p.account_id
-WHERE h.handle = 'jakebotberg'
+WHERE h.handle = 'CUTOVER_AGENT_HANDLE'
 GROUP BY h.handle
 HAVING count(DISTINCT a.id) <> 1;
 -- Expected: 0 rows
 
--- A3) Must return exactly one principal for Jake's account
+-- A3) Must return exactly one principal for the cutover account
 SELECT a.id AS account_id, count(p.id) AS principal_count
 FROM accounts a
 JOIN principals p ON p.account_id = a.id
 JOIN handles h ON h.principal_id = p.id
-WHERE h.handle = 'jakebotberg'
+WHERE h.handle = 'CUTOVER_AGENT_HANDLE'
 GROUP BY a.id
 HAVING count(p.id) <> 1;
 -- Expected: 0 rows
 
--- A4) Dev clerk_user_id must match expected (replace if preflight shows different prefix)
+-- A4) Dev clerk_user_id must match the recorded Development ID
 SELECT h.handle, a.clerk_user_id
 FROM handles h
 JOIN principals p ON p.id = h.principal_id
 JOIN accounts a ON a.id = p.account_id
-WHERE h.handle = 'jakebotberg'
-  AND a.clerk_user_id <> 'user_3I4GEMsFuxECI5ZDo0o7dAgvbuV';
+WHERE h.handle = 'CUTOVER_AGENT_HANDLE'
+  AND a.clerk_user_id <> 'DEV_CLERK_USER_ID';
 -- Expected: 0 rows (if non-zero, STOP — use exact value from A1)
 
--- A5) Margot baseline — save for post-cutover unchanged check (DO NOT MODIFY)
+-- A5) Out-of-scope account baseline — save for post-cutover unchanged check (DO NOT MODIFY)
 SELECT
   h.handle AS agent_handle,
   a.id AS account_id,
@@ -89,32 +95,32 @@ SELECT
 FROM handles h
 JOIN principals p ON p.id = h.principal_id
 JOIN accounts a ON a.id = p.account_id
-WHERE h.handle = 'margot_botberg';
+WHERE h.handle = 'UNCHANGED_AGENT_HANDLE';
 
 -- A6) Prod clerk_user_id must not already exist on another account
 SELECT id, clerk_user_id, email
 FROM accounts
-WHERE clerk_user_id = 'user_3IWJr7h5jpvnmAs8DA3BJmnjAF1';
+WHERE clerk_user_id = 'PROD_CLERK_USER_ID';
 -- Expected: 0 rows
 
 -- =============================================================================
--- B. JAKE REMAP (execute only during approved cutover window)
+-- B. CUTOVER REMAP (historical — already committed 2026-08-28)
 -- =============================================================================
 
 BEGIN;
 
 UPDATE accounts
 SET
-  clerk_user_id = 'user_3IWJr7h5jpvnmAs8DA3BJmnjAF1',
+  clerk_user_id = 'PROD_CLERK_USER_ID',
   updated_at = now()
 WHERE id = (
   SELECT a.id
   FROM accounts a
   JOIN principals p ON p.account_id = a.id
   JOIN handles h ON h.principal_id = p.id
-  WHERE h.handle = 'jakebotberg'
+  WHERE h.handle = 'CUTOVER_AGENT_HANDLE'
 )
-  AND clerk_user_id = 'user_3I4GEMsFuxECI5ZDo0o7dAgvbuV';
+  AND clerk_user_id = 'DEV_CLERK_USER_ID';
 
 -- Must affect exactly 1 row. If 0 rows: ROLLBACK and stop.
 -- GET DIAGNOSTICS: in psql use \echo or check ROW_COUNT
@@ -124,16 +130,16 @@ SELECT h.handle, a.id AS account_id, a.clerk_user_id, a.email
 FROM handles h
 JOIN principals p ON p.id = h.principal_id
 JOIN accounts a ON a.id = p.account_id
-WHERE h.handle = 'jakebotberg';
--- Expected: clerk_user_id = user_3IWJr7h5jpvnmAs8DA3BJmnjAF1
+WHERE h.handle = 'CUTOVER_AGENT_HANDLE';
+-- Expected: clerk_user_id = PROD_CLERK_USER_ID
 
--- Margot unchanged (inside transaction):
+-- Out-of-scope account unchanged (inside transaction):
 SELECT h.handle, a.clerk_user_id
 FROM handles h
 JOIN principals p ON p.id = h.principal_id
 JOIN accounts a ON a.id = p.account_id
-WHERE h.handle = 'margot_botberg';
--- Expected: same dev clerk_user_id as A5 baseline
+WHERE h.handle = 'UNCHANGED_AGENT_HANDLE';
+-- Expected: same Development clerk_user_id as A5 baseline
 
 -- If anything wrong:
 -- ROLLBACK;
@@ -143,18 +149,18 @@ COMMIT;
 -- Immediately switch Railway to pk_live_/sk_live_ and redeploy (human step).
 
 -- =============================================================================
--- C. ROLLBACK (only if cutover fails before stable Prod sign-in; requires Dev keys on Railway)
+-- C. ROLLBACK (historical template only — not a live runbook)
 -- =============================================================================
 
 -- BEGIN;
 -- UPDATE accounts
--- SET clerk_user_id = 'user_3I4GEMsFuxECI5ZDo0o7dAgvbuV', updated_at = now()
+-- SET clerk_user_id = 'DEV_CLERK_USER_ID', updated_at = now()
 -- WHERE id = (
 --   SELECT a.id FROM accounts a
 --   JOIN principals p ON p.account_id = a.id
 --   JOIN handles h ON h.principal_id = p.id
---   WHERE h.handle = 'jakebotberg'
+--   WHERE h.handle = 'CUTOVER_AGENT_HANDLE'
 -- )
---   AND clerk_user_id = 'user_3IWJr7h5jpvnmAs8DA3BJmnjAF1';
+--   AND clerk_user_id = 'PROD_CLERK_USER_ID';
 -- COMMIT;
 -- Then restore Railway pk_test_/sk_test_ and redeploy.

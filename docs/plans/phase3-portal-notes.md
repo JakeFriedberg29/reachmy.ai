@@ -2,6 +2,8 @@
 
 **Status:** Direction captured 2026-08-19. **Not** the detailed implementation plan. Product term is **ReachMy Portal**, not Control Center.
 
+**Later:** The formal plan [`phase3-portal.md`](phase3-portal.md) was subsequently written and approved. Phase 3 is complete. This file remains historical direction notes only.
+
 Do **not** implement from this file. After Phase 2 Tests A/B close and `docs/phase2-validation.md` exists, write [`phase3-portal.md`](phase3-portal.md) and wait for approval before coding.
 
 Canonical index: [`docs/implementation-plan.md`](../implementation-plan.md).

@@ -1,8 +1,17 @@
--- Read-only production identity inspection (Slice 9 remap prerequisite).
--- Run in Neon SQL Editor against production branch (ep-tiny-violet-ayrr8l02).
--- Do not execute writes. Safe to run multiple times.
+-- Read-only identity inspection.
+-- Fill the handle placeholders, then run in the Neon SQL Editor against the
+-- intended branch. Do not execute writes. Safe to run multiple times.
+--
+-- This script does not bypass production database safety. Local and CI runs
+-- already refuse the production Neon endpoint unless ALLOW_PRODUCTION_DB=1
+-- (see src/config.ts `PRODUCTION_NEON_ENDPOINT_ID` / `assertSafeDatabaseUrl`).
 
--- 1) One row per known Agent Name — account binding + counts only
+-- Replace these placeholders before running. Remove unused entries from each
+-- IN list if inspecting a single Agent Name.
+--   'AGENT_HANDLE_1'
+--   'AGENT_HANDLE_2'
+
+-- 1) One row per Agent Name — account binding + counts only
 SELECT
   h.handle AS agent_handle,
   a.email,
@@ -33,7 +42,7 @@ SELECT
 FROM handles h
 JOIN principals p ON p.id = h.principal_id
 JOIN accounts a ON a.id = p.account_id
-WHERE h.handle IN ('jakebotberg', 'margot_botberg')
+WHERE h.handle IN ('AGENT_HANDLE_1', 'AGENT_HANDLE_2')
 ORDER BY h.handle;
 
 -- 2) Sanity: exactly one account per handle (must return zero rows)
@@ -41,7 +50,7 @@ SELECT h.handle, count(DISTINCT a.id) AS account_count
 FROM handles h
 JOIN principals p ON p.id = h.principal_id
 JOIN accounts a ON a.id = p.account_id
-WHERE h.handle IN ('jakebotberg', 'margot_botberg')
+WHERE h.handle IN ('AGENT_HANDLE_1', 'AGENT_HANDLE_2')
 GROUP BY h.handle
 HAVING count(DISTINCT a.id) <> 1;
 
@@ -53,7 +62,7 @@ WHERE a.email IS NOT NULL
     SELECT p.account_id
     FROM handles h
     JOIN principals p ON p.id = h.principal_id
-    WHERE h.handle IN ('jakebotberg', 'margot_botberg')
+    WHERE h.handle IN ('AGENT_HANDLE_1', 'AGENT_HANDLE_2')
   )
 GROUP BY a.email
 HAVING count(*) > 1;
