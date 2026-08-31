@@ -1,6 +1,6 @@
 # reachmy.ai
 
-Phase 1 Agent Network: MCP tools over the Phase 0 domain core.
+Phase 3 complete; Phase 3.5 current. MCP tools over the domain core, Portal at `app.reachmy.ai`. Phase 4 has not started.
 
 **Agent Name** is the durable identity (example: `@jake`). Claude and ChatGPT are AI connections that may represent that Agent Name — they are not the identity.
 
@@ -21,7 +21,7 @@ Do not set Railway Root Directory to `apps/...`. There is no nested app.
 
 Required Railway variables:
 
-- `PUBLIC_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}` (or the hardcoded `https://reachmyai-production.up.railway.app`)
+- `PUBLIC_URL=https://mcp.reachmy.ai` (or `https://${{RAILWAY_PUBLIC_DOMAIN}}` if serving on the Railway hostname)
 - `COOKIE_KEYS` — long random string (32+ characters) for session and OAuth cookie signing. Required in production; local dev may omit to use a named fallback with a startup warning.
 - `DATABASE_URL`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`
 

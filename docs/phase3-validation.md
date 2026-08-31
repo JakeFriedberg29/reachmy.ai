@@ -87,7 +87,7 @@ Local only — uses development Neon via `.env`; production DB guard enforced by
 | `PORTAL_URL` / `PORTAL_HOST` | `https://app.reachmy.ai` / `app.reachmy.ai` |
 | Clerk Production | `pk_live_` / `sk_live_` on active Railway deploy |
 | Clerk application domain | `https://app.reachmy.ai` (root domain `reachmy.ai`) |
-| Clerk Production user (Jake) | `user_3IWJr7h5jpvnmAs8DA3BJmnjAF1` (`jakefriedberg32@gmail.com`) |
+| Clerk Production user (Jake) | Production Clerk user (prefix `user_3IWJ…`) |
 | Neon production endpoint | `ep-tiny-violet-ayrr8l02` |
 | Health | `https://mcp.reachmy.ai/health` → 200; `https://app.reachmy.ai/health` → 200 |
 
@@ -101,12 +101,12 @@ Atomic production transaction remapped **only** `accounts.clerk_user_id` for `@j
 
 | | Clerk user ID |
 |---|---|
-| Before (Dev) | `user_3I4GEMsFuxECI5ZDo0o7dAgvbuV` |
-| After (Prod) | `user_3IWJr7h5jpvnmAs8DA3BJmnjAF1` |
+| Before (Dev) | `user_3I4G…` |
+| After (Prod) | `user_3IWJ…` |
 
 **Preserved:** `account_id`, `principal_id`, Agent Name `@jakebotberg`, connected AI grants (3), relationship rows (1), interaction rows (3).
 
-Script: [`scripts/jake-clerk-production-cutover.sql`](../scripts/jake-clerk-production-cutover.sql)
+Script (historical archive; sanitized; do not re-run): [`scripts/archive/jake-clerk-production-cutover.sql`](../scripts/archive/jake-clerk-production-cutover.sql)
 
 ### Railway Clerk key cutover
 
@@ -156,4 +156,4 @@ pnpm smoke:portal  — 10/10 pass
 
 ## Next step
 
-Phase **4** — Headless conversational UX per [`docs/implementation-plan.md`](implementation-plan.md). Do not start until explicitly approved.
+Phase **3.5** — security hardening and repository hygiene. Current-state record: [`docs/phase3.5-validation.md`](phase3.5-validation.md). Phase 4 (headless conversational UX) has **not** started and must not start until Phase 3.5 closes.

@@ -7,7 +7,7 @@
 | Phase | Status |
 |---|---|
 | -1, 0, 1, 2, 3 | **Complete** — reports: [`phase-minus1-validation.md`](phase-minus1-validation.md), [`phase2-validation.md`](phase2-validation.md), [`phase3-validation.md`](phase3-validation.md) |
-| **3.5** | **Current** — security hardening & repository hygiene. Plan: [`docs/plans/phase3.5-security-hardening.md`](plans/phase3.5-security-hardening.md) |
+| **3.5** | **Current** — security hardening & repository hygiene. Plan: [`docs/plans/phase3.5-security-hardening.md`](plans/phase3.5-security-hardening.md). Current-state record: [`docs/phase3.5-validation.md`](phase3.5-validation.md). **Slice 6b remains BLOCKED.** Phase 3.5 is **not fully closed**. |
 | 4 | **Not started** — headless conversational UX (§6) |
 
 Shipped schema, OAuth issuer/resource, domain services, and MCP tools remain as implemented unless a later approved phase changes them. This document does not reopen Phase 0/1 architecture.
@@ -320,16 +320,16 @@ Railway ReachMy Node/Hono service
 
 Same Railway service, same Neon, same domain services. Framer stays on `reachmy.ai`. No separate Next.js app unless Hono-served UI is proven insufficient.
 
-**Exit criteria**
+**Exit criteria** (checked against [`docs/phase3-validation.md`](phase3-validation.md))
 
-- [ ] Dedicated plan `docs/plans/phase3-portal.md` was approved before coding.
-- [ ] Get Started / Sign In on `reachmy.ai` reaches `app.reachmy.ai` and Clerk.
-- [ ] Signed-in user can Connect Claude and/or ChatGPT **before** claiming an Agent Name; Portal shows Not claimed yet when applicable.
-- [ ] After OAuth, a new `agent_connection` exists on the same account/principal; user returns to that AI.
-- [ ] Your AI Connections shows only user-facing labels (Claude/ChatGPT, Connected / not); no grant/client/token leakage.
-- [ ] Disconnect uses a confirmation step and existing `revokeAgentConnection`; Agent Name remains.
-- [ ] `/admin` is denied without a server-checked platform-admin role (including direct URL navigation).
-- [ ] No inbox/messaging/proposal/scheduling/chat/activity-feed UI.
+- [x] Dedicated plan `docs/plans/phase3-portal.md` was approved before coding.
+- [ ] Get Started / Sign In on `reachmy.ai` reaches `app.reachmy.ai` and Clerk. **Accepted out of scope** — Framer marketing links; operator handles separately. Not a Phase 3 blocker.
+- [x] Signed-in user can Connect Claude and/or ChatGPT **before** claiming an Agent Name; Portal shows Not claimed yet when applicable.
+- [x] After OAuth, a new `agent_connection` exists on the same account/principal; user returns to that AI.
+- [x] Your AI Connections shows only user-facing labels (Claude/ChatGPT, Connected / not); no grant/client/token leakage.
+- [x] Disconnect uses a confirmation step and existing `revokeAgentConnection`; Agent Name remains.
+- [x] `/admin` is denied without a server-checked platform-admin role (including direct URL navigation).
+- [x] No inbox/messaging/proposal/scheduling/chat/activity-feed UI.
 - [x] MCP issuer/resource remain `https://mcp.reachmy.ai` and `https://mcp.reachmy.ai/mcp`.
 
 **Status:** Complete. See [`docs/phase3-validation.md`](phase3-validation.md).
@@ -354,7 +354,7 @@ Same Railway service, same Neon, same domain services. Framer stays on `reachmy.
 
 **Exit criteria:** See Phase 3.5 plan §8. Claude and ChatGPT must still connect and operate.
 
-**Status:** **Current.** Slices 1–5 complete (real-provider regression passed). Slice 6a OAuth observability deployed; ChatGPT `initial_authorization` captured; Claude `initial_authorization` still outstanding. Slice 6b blocked. MCP transport diagnostic addendum deployed at `fdd09ee`.
+**Status:** **Current — not fully closed.** Slices 1–5 complete (real-provider regression passed). Slice 6a OAuth observability deployed; ChatGPT `initial_authorization` captured; Claude `initial_authorization` still outstanding. **Slice 6b remains BLOCKED** (prototype only; production mapping rejected). Slice 7 complete. Slice 8 hygiene recorded in [`docs/phase3.5-validation.md`](phase3.5-validation.md). Phase 4 has **not** started.
 
 #### Phase 4 — Headless conversational UX
 
