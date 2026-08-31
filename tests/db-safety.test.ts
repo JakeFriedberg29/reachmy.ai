@@ -38,7 +38,7 @@ test("assertSafeDatabaseUrl allows production endpoint on Railway", () => {
   assert.doesNotThrow(() =>
     assertSafeDatabaseUrl(
       `postgresql://u:p@${PRODUCTION_NEON_ENDPOINT_ID}-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require`,
-      { onRailway: true },
+      { onRailway: true, inCi: false },
     ),
   );
 });
