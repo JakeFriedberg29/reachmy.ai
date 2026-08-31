@@ -30,7 +30,7 @@ test("assertSafeDatabaseUrl refuses production Neon endpoint locally", () => {
         `postgresql://u:p@${PRODUCTION_NEON_ENDPOINT_ID}.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require`,
         { onRailway: false },
       ),
-    /Refusing to run local development against production database/,
+    /Refusing to run local development or CI against production database/,
   );
 });
 
@@ -38,7 +38,7 @@ test("assertSafeDatabaseUrl allows production endpoint on Railway", () => {
   assert.doesNotThrow(() =>
     assertSafeDatabaseUrl(
       `postgresql://u:p@${PRODUCTION_NEON_ENDPOINT_ID}-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require`,
-      { onRailway: true },
+      { onRailway: true, inCi: false },
     ),
   );
 });
@@ -50,8 +50,48 @@ test("assertSafeDatabaseUrl allows production endpoint with explicit override", 
     assert.doesNotThrow(() =>
       assertSafeDatabaseUrl(
         `postgresql://u:p@${PRODUCTION_NEON_ENDPOINT_ID}.c-5.us-east-2.aws.neon.tech/neondb`,
-        { onRailway: false },
+        { onRailway: false, inCi: false },
       ),
+    );
+  } finally {
+    if (prev === undefined) delete process.env.ALLOW_PRODUCTION_DB;
+    else process.env.ALLOW_PRODUCTION_DB = prev;
+  }
+});
+
+test("assertSafeDatabaseUrl refuses production Neon in GitHub Actions", () => {
+  assert.throws(
+    () =>
+      assertSafeDatabaseUrl(
+        `postgresql://u:p@${PRODUCTION_NEON_ENDPOINT_ID}.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require`,
+        { onRailway: false, inCi: true },
+      ),
+    /GitHub Actions must set secret DATABASE_URL_DEV/,
+  );
+});
+
+test("assertSafeDatabaseUrl refuses production Neon in GitHub Actions even if Railway env leaked", () => {
+  assert.throws(
+    () =>
+      assertSafeDatabaseUrl(
+        `postgresql://u:p@${PRODUCTION_NEON_ENDPOINT_ID}-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require`,
+        { onRailway: true, inCi: true },
+      ),
+    /GitHub Actions must set secret DATABASE_URL_DEV/,
+  );
+});
+
+test("assertSafeDatabaseUrl ignores ALLOW_PRODUCTION_DB in GitHub Actions", () => {
+  const prev = process.env.ALLOW_PRODUCTION_DB;
+  process.env.ALLOW_PRODUCTION_DB = "1";
+  try {
+    assert.throws(
+      () =>
+        assertSafeDatabaseUrl(
+          `postgresql://u:p@${PRODUCTION_NEON_ENDPOINT_ID}.c-5.us-east-2.aws.neon.tech/neondb`,
+          { onRailway: false, inCi: true },
+        ),
+      /GitHub Actions must set secret DATABASE_URL_DEV/,
     );
   } finally {
     if (prev === undefined) delete process.env.ALLOW_PRODUCTION_DB;

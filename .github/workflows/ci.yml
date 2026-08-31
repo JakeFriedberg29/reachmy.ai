@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Do not echo secrets. Do not set RAILWAY_* or ALLOW_PRODUCTION_DB.
+#
+# GitHub Actions secrets for the integration job (development/test only):
+#   DATABASE_URL_DEV          Neon *development* branch URL (ep-steep-dream-ayihhbrl).
+#                             Never the production endpoint (ep-tiny-violet-ayrr8l02).
+#                             Never copy Railway production DATABASE_URL into this secret.
+#   CLERK_PUBLISHABLE_KEY     Existing development/test Clerk publishable key.
+#   CLERK_SECRET_KEY          Existing development/test Clerk secret key.
+#   COOKIE_KEYS               Dedicated CI signing key (not the Railway production value).
+#
+# The app still reads DATABASE_URL. This workflow maps DATABASE_URL_DEV → DATABASE_URL
+# after the production-DB guard has refused the production Neon endpoint.
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Typecheck, lint, format, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: Format check
+        run: pnpm format:check
+      - name: Unit tests (no database, no secrets)
+        run: pnpm test:unit
+
+  integration:
+    name: Full tests and portal smoke
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL_DEV }}
+      CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      COOKIE_KEYS: ${{ secrets.COOKIE_KEYS }}
+      PUBLIC_URL: http://localhost:3000
+      PORTAL_HOST: app.reachmy.ai
+      PORTAL_URL: https://app.reachmy.ai
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip when integration secrets are missing
+        id: gate
+        run: |
+          if [ -z "${DATABASE_URL}" ] || [ -z "${CLERK_PUBLISHABLE_KEY}" ] || [ -z "${CLERK_SECRET_KEY}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Integration secrets are not configured; skipping full tests and portal smoke."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: pnpm/action-setup@v4
+        if: steps.gate.outputs.configured == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.configured == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install dependencies
+        if: steps.gate.outputs.configured == 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Reject production DATABASE_URL
+        if: steps.gate.outputs.configured == 'true'
+        run: pnpm exec tsx scripts/assert-safe-database-url.ts
+      - name: Write test env file
+        if: steps.gate.outputs.configured == 'true'
+        run: |
+          umask 077
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          keys = [
+              "DATABASE_URL",
+              "CLERK_PUBLISHABLE_KEY",
+              "CLERK_SECRET_KEY",
+              "COOKIE_KEYS",
+              "PUBLIC_URL",
+              "PORTAL_HOST",
+              "PORTAL_URL",
+          ]
+          lines = [f"{key}={os.environ[key]}" for key in keys if os.environ.get(key)]
+          Path(".env").write_text("\n".join(lines) + "\n")
+          PY
+      - name: Full test suite
+        if: steps.gate.outputs.configured == 'true'
+        run: pnpm test
+      - name: Portal smoke
+        if: steps.gate.outputs.configured == 'true'
+        run: pnpm smoke:portal
