@@ -27,7 +27,11 @@ function mockRequest(
   const headers: Record<string, string> = {};
   if (init.cookie) headers.cookie = init.cookie;
   if (init.authorization) headers.authorization = init.authorization;
-  return { headers, method: init.method ?? "GET", url: init.url ?? "/interaction/test" } as http.IncomingMessage;
+  return {
+    headers,
+    method: init.method ?? "GET",
+    url: init.url ?? "/interaction/test",
+  } as http.IncomingMessage;
 }
 
 test("Slice 3A: existing an_session resolves without Clerk bridge", async () => {
@@ -72,7 +76,10 @@ test("Slice 3C: new Clerk user creates ReachMy account", async () => {
   const config = loadConfig();
   const tag = suffix();
   const clerkUserId = `new_clerk_${tag}`;
-  setClerkBrowserSessionResolverForTests(async () => ({ clerkUserId, email: `new_${tag}@example.test` }));
+  setClerkBrowserSessionResolverForTests(async () => ({
+    clerkUserId,
+    email: `new_${tag}@example.test`,
+  }));
   const resolved = await resolveBrowserAccountId(mockRequest(), config, db);
   assert.ok(resolved);
   const identity = await getIdentityByAccountId(db, resolved.accountId);
@@ -89,7 +96,10 @@ test("Slice 3D: existing Clerk user reuses the same account", async () => {
     clerkUserId,
     email: `reuse_${tag}@example.test`,
   });
-  setClerkBrowserSessionResolverForTests(async () => ({ clerkUserId, email: `reuse_${tag}@example.test` }));
+  setClerkBrowserSessionResolverForTests(async () => ({
+    clerkUserId,
+    email: `reuse_${tag}@example.test`,
+  }));
   const resolved = await resolveBrowserAccountId(mockRequest(), config, db);
   assert.ok(resolved);
   assert.equal(resolved.accountId, existing.account_id);
@@ -137,7 +147,11 @@ test("Slice 3H: invalid Clerk session falls back safely", async () => {
   const db = await testDb();
   const config = loadConfig();
   setClerkBrowserSessionResolverForTests(async () => null);
-  const resolved = await resolveBrowserAccountId(mockRequest({ cookie: "__session=invalid" }), config, db);
+  const resolved = await resolveBrowserAccountId(
+    mockRequest({ cookie: "__session=invalid" }),
+    config,
+    db,
+  );
   assert.equal(resolved, null);
 });
 
@@ -218,14 +232,15 @@ test("Slice 3: OAuth interaction accepts Clerk bridge and mints an_session", asy
         req.end();
       });
       const setCookie = res.headers["set-cookie"];
-      if (typeof setCookie === "string") jar.push(setCookie.split(";")[0]!);
-      else if (Array.isArray(setCookie)) {
+      if (Array.isArray(setCookie)) {
         for (const raw of setCookie) jar.push(raw.split(";")[0]!);
       }
       return res;
     };
 
-    const prm = JSON.parse((await visit("/.well-known/oauth-protected-resource")).body) as { resource: string };
+    const prm = JSON.parse((await visit("/.well-known/oauth-protected-resource")).body) as {
+      resource: string;
+    };
     const asm = JSON.parse((await visit("/.well-known/oauth-authorization-server")).body) as {
       registration_endpoint: string;
     };
@@ -278,11 +293,11 @@ test("Slice 3: OAuth interaction accepts Clerk bridge and mints an_session", asy
       if (res.status === 200 && url.startsWith("/interaction/")) {
         assert.ok(sawSessionMint, "expected an_session minted via Clerk bridge");
         assert.match(res.body, /Authorize an agent/);
-        const identity = await getIdentityByAccountId(db, (await resolveBrowserAccountId(
-          mockRequest({ cookie: jar.join("; ") }),
-          config,
+        const identity = await getIdentityByAccountId(
           db,
-        ))!.accountId);
+          (await resolveBrowserAccountId(mockRequest({ cookie: jar.join("; ") }), config, db))!
+            .accountId,
+        );
         assert.equal(identity.clerk_user_id, clerkUserId);
         return;
       }
@@ -311,7 +326,10 @@ test("Slice 3J: Clerk bridge OAuth consent preserves provisional principal lifec
   assert.ok(identity.principal_id);
   assert.equal(identity.handle, null);
   assert.equal(identity.onboarding, "ONBOARDING_REQUIRED");
-  const rows = await db.select().from(principals).where(eq(principals.accountId, resolved.accountId));
+  const rows = await db
+    .select()
+    .from(principals)
+    .where(eq(principals.accountId, resolved.accountId));
   assert.equal(rows.length, 1);
 });
 
@@ -329,7 +347,9 @@ test("Slice 3: GET /sign-in redirects when Clerk bridge resolves account", async
     assert.equal(location, "/security");
     const setCookie = res.headers["set-cookie"];
     assert.ok(
-      (Array.isArray(setCookie) ? setCookie.join(";") : String(setCookie ?? "")).includes(`${SESSION_COOKIE}=`),
+      (Array.isArray(setCookie) ? setCookie.join(";") : String(setCookie ?? "")).includes(
+        `${SESSION_COOKIE}=`,
+      ),
     );
   });
 });

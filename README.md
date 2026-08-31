@@ -56,3 +56,5 @@ pnpm dev
 ```
 
 Required env: `PUBLIC_URL`, `DATABASE_URL`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`. `COOKIE_KEYS` is required in production (32+ characters); optional locally with a dev fallback warning.
+
+GitHub Actions integration (optional second job) reads secret `DATABASE_URL_DEV` — the Neon development branch URL — and maps it to `DATABASE_URL`. Do not put the Railway production `DATABASE_URL` in GitHub Actions.

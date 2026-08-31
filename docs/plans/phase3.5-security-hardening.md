@@ -720,12 +720,17 @@ Do not use the current connections to force Claude re-authorization.
 
 **Objective.** Lightweight automated engineering gates. No complicated build or release system.
 
-**Approach.** ESLint (typescript-eslint) + Prettier with a config that does not churn history.
-Replace the hand-enumerated `test` script with glob-based discovery. Typecheck `tests/` (currently
-excluded by `tsconfig.json:15`).
+**Approach.** ESLint (typescript-eslint) + Prettier with incremental format checks: `pnpm
+format:check` runs Prettier only on files changed vs `origin/main` (plus untracked), so historical
+trees are not rewritten and newly touched application/test files become covered. Replace the
+hand-enumerated `test` script with glob-based discovery. Typecheck `tests/` (currently excluded by
+`tsconfig.json:15`).
 
 **CI constraint (real).** The suite requires a live Neon dev database and Clerk keys. CI must
-therefore run in two tiers:
+therefore run in two tiers. Integration `DATABASE_URL` comes only from GitHub secret
+`DATABASE_URL_DEV` (Neon development branch). The existing `assertSafeDatabaseUrl` guard refuses the
+production Neon endpoint in GitHub Actions even if `RAILWAY_*` or `ALLOW_PRODUCTION_DB` leak in.
+Do not copy Railway production variables into GitHub Actions.
 
 - **Always:** typecheck, lint, format check, and the DB-free unit tests (`host-routing`,
   `db-safety`, scope map, redirect helper)
@@ -867,10 +872,12 @@ not a security issue. Do not spend slice time on it.
 | 111 | **`openid` and `offline_access` are protocol scopes and never authorize MCP tools.** |
 | 112 | **Slice 6b remains blocked on:** (1) a coherent final scope model, (2) working ChatGPT live validation, (3) fresh Claude `initial_authorization` evidence (gate 96 / decision 103). Do not revoke the live Claude grant to force (3). |
 | 113 | **6b prototype is parked, not shipped.** Durable local branch `prototype/phase3.5-slice6b-scope-enforcement`. Do not merge or push it to production/`main` unless explicitly requested. Keep Slice 6a observability in production. |
+| 114 | **Selective pre-Phase-3.5 rollback did not restore ChatGPT.** A diagnostic build on `diagnostic/chatgpt-pre-phase3.5` (`fb6ea26`, Railway `cea6a189`) restored pre-Phase-3.5 consent/DCR/scope behavior while keeping grant-rebind, redirect hardening, production `COOKIE_KEYS`, subject-mismatch protection, and production hiding of `phase-minus1-cli` / `/dev/callback`. Tested 2026-08-30: ChatGPT recognized `@reachmy.ai` but exposed no callable tools. ReachMy received zero ChatGPT traffic (`no /reg`, `/auth`, `/token`, `/mcp`, `oauth_debug`, `mcp_debug`, or `openai-mcp` user-agent). Slices 4, 5, and 6a are ruled out as the cause of the current ChatGPT connector-loading failure. The failure is upstream of ReachMy MCP/OAuth invocation. No further ReachMy rollback is warranted for this symptom. Production was restored to `origin/main` `@ cf7b84a` (Railway `efcbe351`). The diagnostic branch is preserved as evidence; it was not merged. |
 
 ---
 
 *End of Phase 3.5 plan. Slices 1–5 complete (real-provider regression passed). Slice 6a OAuth
 observability deployed; ChatGPT `initial_authorization` captured; Claude `initial_authorization`
 still outstanding. Slice 6a diagnostic addendum deployed at `fdd09ee`. Slice 6b remains blocked
-(prototype only; production mapping rejected). Slices 7–8 not started.*
+(prototype only; production mapping rejected). A 2026-08-30 selective rollback of Slices 4/5/6a
+did not restore ChatGPT (decision 114); production remains `cf7b84a`. Slices 7–8 not started.*

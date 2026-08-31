@@ -18,7 +18,11 @@ function hostnameOnly(value: string): string {
 }
 
 function unique(values: Array<string | undefined>): string[] {
-  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
+  return [
+    ...new Set(
+      values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)),
+    ),
+  ];
 }
 
 /** Known production Neon compute endpoint — local/dev must not write here. */
@@ -37,19 +41,28 @@ let warnedDevCookieKey = false;
 export function isRailwayRuntime(): boolean {
   return Boolean(
     process.env.RAILWAY_ENVIRONMENT ||
-      process.env.RAILWAY_ENVIRONMENT_ID ||
-      process.env.RAILWAY_PROJECT_ID,
+    process.env.RAILWAY_ENVIRONMENT_ID ||
+    process.env.RAILWAY_PROJECT_ID,
   );
 }
 
+export function isGitHubActions(): boolean {
+  return process.env.GITHUB_ACTIONS === "true";
+}
+
 /**
- * Fail closed for local/dev/test: refuse DATABASE_URL pointing at production Neon.
- * Railway production is allowed. Emergency override: ALLOW_PRODUCTION_DB=1.
+ * Fail closed for local/dev/test/CI: refuse DATABASE_URL pointing at production Neon.
+ * Railway production is allowed only when not running in GitHub Actions.
+ * Emergency override ALLOW_PRODUCTION_DB=1 is ignored in GitHub Actions.
  */
-export function assertSafeDatabaseUrl(databaseUrl: string, opts?: { onRailway?: boolean }): void {
+export function assertSafeDatabaseUrl(
+  databaseUrl: string,
+  opts?: { onRailway?: boolean; inCi?: boolean },
+): void {
+  const inCi = opts?.inCi ?? isGitHubActions();
   const onRailway = opts?.onRailway ?? isRailwayRuntime();
-  if (onRailway) return;
-  if (process.env.ALLOW_PRODUCTION_DB === "1") return;
+  if (onRailway && !inCi) return;
+  if (!inCi && process.env.ALLOW_PRODUCTION_DB === "1") return;
 
   let hostname = "";
   try {
@@ -60,9 +73,11 @@ export function assertSafeDatabaseUrl(databaseUrl: string, opts?: { onRailway?: 
 
   if (hostname.includes(PRODUCTION_NEON_ENDPOINT_ID)) {
     throw new Error(
-      "Refusing to run local development against production database " +
-        `(${PRODUCTION_NEON_ENDPOINT_ID}). Use the Neon development branch endpoint, ` +
-        "or set ALLOW_PRODUCTION_DB=1 only for an explicit emergency.",
+      "Refusing to run local development or CI against production database " +
+        `(${PRODUCTION_NEON_ENDPOINT_ID}). Use the Neon development branch endpoint. ` +
+        (inCi
+          ? "GitHub Actions must set secret DATABASE_URL_DEV to that non-production URL."
+          : "Set ALLOW_PRODUCTION_DB=1 only for an explicit emergency."),
     );
   }
 }
@@ -70,10 +85,7 @@ export function assertSafeDatabaseUrl(databaseUrl: string, opts?: { onRailway?: 
 /**
  * Production when running on Railway or when PUBLIC_URL is HTTPS on a non-localhost host.
  */
-export function isProductionRuntime(
-  publicUrl: string,
-  opts?: { onRailway?: boolean },
-): boolean {
+export function isProductionRuntime(publicUrl: string, opts?: { onRailway?: boolean }): boolean {
   const onRailway = opts?.onRailway ?? isRailwayRuntime();
   if (onRailway) return true;
   try {
@@ -159,8 +171,7 @@ export function loadConfig(): AppConfig {
   const onRailway = isRailwayRuntime();
   const railwayHost = hostnameOnly(process.env.RAILWAY_PUBLIC_DOMAIN ?? "");
   const publicUrl = stripTrailingSlash(
-    process.env.PUBLIC_URL ??
-      (railwayHost ? `https://${railwayHost}` : `http://localhost:${port}`),
+    process.env.PUBLIC_URL ?? (railwayHost ? `https://${railwayHost}` : `http://localhost:${port}`),
   );
 
   if (onRailway && new URL(publicUrl).hostname === "localhost") {

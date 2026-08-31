@@ -1,0 +1,11 @@
+# Generated / vendor — never format these.
+dist/
+dist-tests/
+node_modules/
+pnpm-lock.yaml
+drizzle/
+*.sql
+
+# Markdown stays out of Slice 7. Reformatting historical docs (especially the
+# Phase 3.5 plan) would be a large unrelated diff. Slice 8 can adopt docs later.
+docs/
